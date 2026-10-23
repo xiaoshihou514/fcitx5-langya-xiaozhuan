@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name_debug">Fcitx5（琅琊小篆插件｜调试）</string>
+    <string name="app_name_release">Fcitx5（琅琊小篆插件）</string>
+    <string name="description">琅琊：拼音输入《說文解字》小篆（Unicode 18.0 小篆区）</string>
+</resources>

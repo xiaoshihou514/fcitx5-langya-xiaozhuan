@@ -1,0 +1,11 @@
+{
+    "uniqueId": "langya/fcitx5-langya",
+    "artifactVersion": "0.1.0",
+    "description": "Langya: pinyin input method for Shuowen seal script (Unicode 18.0 Small Seal block)",
+    "name": "langya",
+    "website": "https://github.com/fcitx5-android/fcitx5-android",
+    "tag": "native",
+    "licenses": [
+        "MIT"
+    ]
+}

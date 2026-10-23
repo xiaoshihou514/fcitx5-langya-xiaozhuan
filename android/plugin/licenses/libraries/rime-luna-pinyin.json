@@ -1,0 +1,11 @@
+{
+    "uniqueId": "rime/rime-luna-pinyin",
+    "artifactVersion": "2024.02.10",
+    "description": "Luna Pinyin dictionary and essay vocabulary (pinyin codes and weights)",
+    "name": "rime-luna-pinyin",
+    "website": "https://github.com/rime/rime-luna-pinyin",
+    "tag": "data",
+    "licenses": [
+        "LGPL-3.0-or-later"
+    ]
+}

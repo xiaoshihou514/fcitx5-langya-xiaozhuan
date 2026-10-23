@@ -1,0 +1,14 @@
+[Addon]
+Name=Langya
+Name[zh_CN]=琅琊小篆
+Category=InputMethod
+Version=@PROJECT_VERSION@
+Library=langya
+Type=SharedLibrary
+OnDemand=True
+Configurable=True
+
+# punctuation 为可选增强（硬依赖会在其缺失时被 fcitx5 静默剔除，
+# Fedora 将其拆入 fcitx5-chinese-addons 数据包）
+[Addon/OptionalDependencies]
+0=punctuation
