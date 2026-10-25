@@ -49,6 +49,9 @@ target("langya")
     add_cxxflags("-fvisibility=hidden", "-fvisibility-inlines-hidden",
                  {force = true})
     add_ldflags("-Wl,--no-undefined", "-Wl,--as-needed", {force = true})
+    -- $ORIGIN RPATH：与 libIME*.so 同目录即可运行（用户级安装免
+    -- LD_LIBRARY_PATH；须防 shell 展开，经 linker script 参数传入）
+    add_shflags([[-Wl,-rpath,$ORIGIN]], {force = true})
     on_load(function (target)
         import("lib.detect.find_package")
         local pkg = find_package("Fcitx5Core")
@@ -83,27 +86,71 @@ target("langya")
         end
     end)
 
-    -- 安装全部手动接管（on_install 替换内建安装，避免默认落到 lib/）
+    -- 用户级 XDG 安装（xmake install，无 -o 时装 ~/.local）：
+    --   ~/.local/lib/fcitx5/{langya.so, libIME*.so}   引擎+libime（RPATH 免配置）
+    --   ~/.local/share/fcitx5/{addon,inputmethod,langya}/  注册与映射
+    --   ~/.local/share/libime/                        拼音词典/语言模型
+    --   ~/.config/environment.d/langya-fcitx5.conf    addon 搜索路径（重登录生效）
     on_install(function (target)
         import("core.base.option")
-        local installdir = option.get("installdir") or "/usr/local"
+        local home = os.getenv("HOME")
+        local inst = option.get("installdir")
+            or path.join(home, ".local")
         local confroot = path.join(target:autogendir(), "conf")
-        os.mkdir(path.join(installdir, libdir, "fcitx5"))
-        os.cp(target:targetfile(),
-              path.join(installdir, libdir, "fcitx5", "langya.so"))
-        os.mkdir(path.join(installdir, confdir))
-        os.cp(path.join(confroot, confdir) .. "/.",
-              path.join(installdir, confdir) .. "/")
-        os.cp(path.join(os.projectdir(), "icons", "."),
-              path.join(installdir, "share", "icons", "hicolor"))
-        if os.isfile("data/langya.map") then
-            os.mkdir(path.join(installdir, confdir, "langya"))
-            os.cp("data/langya.map",
-                  path.join(installdir, confdir, "langya", "langya.map"))
-        else
-            print("提示：缺 data/langya.map。"
-                .. "请先运行 xmake export-char-map")
+        local root = os.getenv("FCITX_ROOT") or "/tmp/fcitx5root"
+
+        -- 引擎与 libime 同目录（$ORIGIN 互相可见）
+        local libdir_ = path.join(inst, "lib", "fcitx5")
+        os.mkdir(libdir_)
+        os.cp(target:targetfile(), path.join(libdir_, "langya.so"))
+        for _, so in ipairs(os.files(path.join(root, "usr", "lib64",
+                                               "libIMECore.so*"))) do
+            os.cp(so, libdir_)
         end
+        for _, so in ipairs(os.files(path.join(root, "usr", "lib64",
+                                               "libIMEPinyin.so*"))) do
+            os.cp(so, libdir_)
+        end
+
+        -- fcitx5 注册文件与琅琊映射
+        local share = path.join(inst, "share")
+        os.mkdir(path.join(share, "fcitx5", "addon"))
+        os.mkdir(path.join(share, "fcitx5", "inputmethod"))
+        os.mkdir(path.join(share, "fcitx5", "langya"))
+        os.cp(path.join(confroot, confdir, "addon", "langya.conf"),
+              path.join(share, "fcitx5", "addon"))
+        os.cp(path.join(confroot, confdir, "inputmethod", "langya.conf"),
+              path.join(share, "fcitx5", "inputmethod"))
+        os.cp(path.join(os.projectdir(), "icons", "."),
+              path.join(share, "icons", "hicolor"))
+        if os.isfile("data/langya.map") then
+            os.cp("data/langya.map",
+                  path.join(share, "fcitx5", "langya", "langya.map"))
+        else
+            print("提示：缺 data/langya.map，请先运行 xmake export-char-map")
+        end
+
+        -- libime 数据（sc.dict + zh_CN.lm），XDG Data 路径
+        local lm = path.join(root, "usr", "lib64", "libime")
+        os.mkdir(path.join(share, "libime"))
+        os.cp(path.join(root, "usr", "share", "libime", "sc.dict"),
+              path.join(share, "libime"))
+        for _, f in ipairs(os.files(path.join(lm, "zh_CN.lm*"))) do
+            os.cp(f, path.join(share, "libime"))
+        end
+
+        -- addon 搜索路径（fcitx5 不默认搜 ~/.local/lib/fcitx5）：
+        -- environment.d 对 systemd 用户会话生效（KDE Wayland 需重新登录）
+        local envd = path.join(home, ".config", "environment.d")
+        os.mkdir(envd)
+        io.writefile(path.join(envd, "langya-fcitx5.conf"),
+                     "FCITX_ADDON_DIRS=" .. libdir_
+                         .. ":/usr/lib64/fcitx5\n")
+        local msg = [[✓ 用户级安装完成 → %s
+  立即生效：export FCITX_ADDON_DIRS=%s:/usr/lib64/fcitx5 && fcitx5 -r
+  重登录后：environment.d 自动生效
+  添加输入法：系统设置→键盘→输入法→添加「琅琊小篆」]]
+        print(msg:format(inst, libdir_))
     end)
 
 -- ── 数据管线任务 ─────────────────────────────────────────
@@ -162,6 +209,44 @@ task("export-char-map")
     set_menu {
         usage = "xmake export-char-map",
         description = "导出 data/langya.map（汉字→小篆码点/楷化字）",
+    }
+
+-- 卸载用户级安装（xmake uninstall）
+task("uninstall")
+    set_category("langya")
+    on_run(function ()
+        local home = os.getenv("HOME")
+        local files = {
+            path.join(home, ".local/lib/fcitx5/langya.so"),
+            path.join(home, ".local/share/fcitx5/addon/langya.conf"),
+            path.join(home, ".local/share/fcitx5/inputmethod/langya.conf"),
+            path.join(home, ".local/share/fcitx5/langya/langya.map"),
+            path.join(home, ".config/environment.d/langya-fcitx5.conf"),
+        }
+        for _, f in ipairs(files) do
+            if os.isfile(f) then
+                os.tryrm(f)
+                print("已删 %s", f)
+            end
+        end
+        -- libIME* 与 libime 数据为本安装器放入，一并清理
+        for _, f in ipairs(os.files(path.join(home, ".local/lib/fcitx5",
+                                              "libIME*.so*"))) do
+            os.tryrm(f)
+            print("已删 %s", f)
+        end
+        for _, f in ipairs({"sc.dict", "zh_CN.lm", "zh_CN.lm.predict"}) do
+            local p2 = path.join(home, ".local/share/libime", f)
+            if os.isfile(p2) then
+                os.tryrm(p2)
+                print("已删 %s", p2)
+            end
+        end
+        print("完成。输入法列表里的「琅琊小篆」请在系统设置中手动移除")
+    end)
+    set_menu {
+        usage = "xmake uninstall",
+        description = "卸载用户级琅琊安装（~/.local 布局）",
     }
 
 includes("tests/xmake.lua")

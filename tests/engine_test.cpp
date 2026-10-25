@@ -137,8 +137,19 @@ int main() {
         key("w"); key("o"); key("space");
         check(true, "切楷化后 wo+空格 上屏「我」");
 
-        // 切回小篆
+        // 切回小篆（模式已持久化到配置——重新激活后应保持）
         toggleMode();
+        // 7) 持久化回归：重新激活引擎（模拟切换走再切回），模式须保持小篆
+        {
+            // 触发 activate：重新 focus
+            tf->call<ITestFrontend::destroyInputContext>(uuid);
+            uuid = tf->call<ITestFrontend::createInputContext>("langya-test2");
+            auto *ic2 = instance.inputContextManager().findByUUID(uuid);
+            ic2->focusIn();
+            tf->call<ITestFrontend::pushCommitExpectation>(cp(0x3F57E));
+            key("w"); key("o"); key("space");
+            check(true, "重新激活后模式保持小篆（wo → 𿕾）");
+        }
 
         // 3) 词组：zhongguo + 空格 → 中(U+3D119) 國(U+3E1D3)
         tf->call<ITestFrontend::pushCommitExpectation>(
@@ -163,6 +174,32 @@ int main() {
             uuid, Key(FcitxKey_o, KeyStates(KeyState::NumLock)), false);
         key("space");
         check(true, "NumLock 状态下 wo+空格 仍上屏小篆「我」");
+
+        // 8) 翻页选词：ni + PageDown 翻页 + 数字选第二页第 1 项
+        //    （ni 第 6 候选「呢」，說文未收回退原字）
+        tf->call<ITestFrontend::pushCommitExpectation>("呢");
+        key("n"); key("i");
+        key("Page_Down");
+        key("1");
+        check(true, "ni+PageDown+1 翻页选词上屏「呢」");
+        // 8b) 翻页保持高亮位：ni+Right(高亮第2)+PageDown(应仍指
+        //     第2)+space（选第二页第2项＝第7候选，非第一页的「拟」）
+        tf->call<ITestFrontend::pushCommitExpectation>(cp(0x3E864));
+        {
+            key("n"); key("i");
+            key("Right");            // 高亮 → 第 2 项
+            key("Page_Down");        // 翻页，SameAsLast 保持第 2 项
+            key("space");            // 选第二页第 2 项（𾡤=尼，libime 第 7 候选）
+        }
+        check(true, "ni+Right+PageDown+空格 翻页保持高亮位并选所指");
+
+        // 9) 方向键浏览：zhongguo + Right 移高亮 + 空格确认所指
+        //    （第 2 候选「中过」）
+        tf->call<ITestFrontend::pushCommitExpectation>(cp(0x3D119) + cp(0x3D4E7));
+        for (char c : std::string("zhongguo")) key(std::string(1, c));
+        key("Right");
+        key("space");
+        check(true, "zhongguo+Right+空格 上屏高亮候选");
 
         // 6) 退格改键：woh + 退格 + 空格 → 我 U+3F57E
         tf->call<ITestFrontend::pushCommitExpectation>(cp(0x3F57E));

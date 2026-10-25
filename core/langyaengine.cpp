@@ -214,8 +214,14 @@ LangyaState *LangyaEngine::state(fcitx::InputContext *ic) {
 void LangyaEngine::toggleMode(fcitx::InputContext *ic) {
     auto *st = state(ic);
     st->sealMode = !st->sealMode;
+    // 持久化：把当前模式写回默认配置，跨输入框/切换/重启保持
+    // （真机反馈：此前每次激活都重置为固定默认，需反复切换）
+    config_.sealByDefault.setValue(st->sealMode);
+    fcitx::safeSaveAsIni(config_, "conf/langya.conf");
     updateUI(ic);
     modeAction_.update(ic);
+    FCITX_INFO() << "琅琊模式切换 → "
+                 << (st->sealMode ? "小篆" : "楷化") << "（已持久化）";
 }
 
 /* ── 键处理 ─────────────────────────────────────────────── */
@@ -239,6 +245,48 @@ void LangyaEngine::keyEvent(const fcitx::InputMethodEntry & /*entry*/,
 
     auto &ctx = st->context;
     const bool composing = !ctx.userInput().empty();
+    auto candList = ic->inputPanel().candidateList();
+
+    // ── 候选导航（复用 fcitx5 通用候选接口，pinyin 引擎同款）──
+    // 翻页：PageUp/- 上一页，PageDown/=/+ 下一页（fcitx5-android
+    // 候选栏左右箭头走 pageable 接口，同样由此生效）
+    if (composing && candList) {
+        bool nav = false;
+        if (auto *pageable = candList->toPageable()) {
+            if ((key.check(FcitxKey_Page_Up) || key.check(FcitxKey_minus))
+                && noModifier(key.states())) {
+                if (pageable->hasPrev()) {
+                    pageable->prev();
+                    nav = true;
+                } else {
+                    event.filterAndAccept();
+                    return;
+                }
+            }
+            if ((key.check(FcitxKey_Page_Down) || key.check(FcitxKey_equal)
+                 || key.check(FcitxKey_plus)) && noModifier(key.states())) {
+                pageable->next();
+                nav = true;
+            }
+        }
+        if (auto *movable = candList->toCursorMovable()) {
+            if (noModifier(key.states())
+                && (key.check(FcitxKey_Right) || key.check(FcitxKey_Down))) {
+                movable->nextCandidate();
+                nav = true;
+            }
+            if (noModifier(key.states())
+                && (key.check(FcitxKey_Left) || key.check(FcitxKey_Up))) {
+                movable->prevCandidate();
+                nav = true;
+            }
+        }
+        if (nav) {
+            ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+            event.filterAndAccept();
+            return;
+        }
+    }
 
     if (plainSym(key, FcitxKey_BackSpace)) {
         if (composing) {
@@ -256,24 +304,23 @@ void LangyaEngine::keyEvent(const fcitx::InputMethodEntry & /*entry*/,
         }
         return;
     }
-    // 空格：上屏首选
+    // 空格：上屏当前高亮候选（未浏览时即首选；方向键移动后为所指项）
     if (plainSym(key, FcitxKey_space)) {
-        if (!ctx.candidatesToCursor().empty()) {
-            commitEntry(ic,
-                        ctx.candidatesToCursor()[0].toString(), false);
+        auto cands = ic->inputPanel().candidateList();
+        if (cands && cands->size() > 0) {
+            int cur = cands->cursorIndex();
+            cands->candidate(cur < 0 ? 0 : cur).select(ic);
             event.filterAndAccept();
         }
         return;
     }
-    // 数字：候选选择（1234567890 顺序）
+    // 数字：选当前页第 idx 个候选（1234567890 顺序；翻页后
+    // 指新页——与 pinyin 的 keyListIndex(selectionKeys) 同语义）
     if (key.sym() >= FcitxKey_0 && key.sym() <= FcitxKey_9
         && noModifier(key.states()) && composing) {
         int idx = key.digitSelection();
-        const auto &cands = ctx.candidatesToCursor();
-        if (idx >= 0 && static_cast<size_t>(idx) < cands.size()) {
-            commitEntry(ic, cands[idx].toString(), false);
-            event.filterAndAccept();
-            return;
+        if (candList && idx >= 0 && idx < candList->size()) {
+            candList->candidate(idx).select(ic);
         }
         event.filterAndAccept();
         return;
@@ -308,19 +355,25 @@ void LangyaEngine::updateUI(fcitx::InputContext *ic) {
         return;
     }
 
-    // 预编辑显示在候选面板（拼音串，libime 自带分隔）；
-    // 客户端预编辑显示已选汉字的楷化形式（可读）
-    panel.setPreedit(fcitx::Text(ctx.preedit()));
-    auto selected = ctx.selectedSentence();
-    if (!selected.empty()) {
-        panel.setClientPreedit(fcitx::Text(
-            charmap().convert(selected, false).first));
-    } else {
-        panel.setClientPreedit(fcitx::Text(""));
+    // 预编辑（与 fcitx5 拼音同款）：
+    //   客户端预编辑（应用输入框内嵌）＝ 自动转换整句的楷化显示
+    //   ＝ 已选句 + 当前最优候选（打 nihao 输入框直接显示「你好」）；
+    //   面板预编辑（候选栏上方）＝ 拼音串（libime 带音节分隔）
+    std::string sentence = ctx.selectedSentence();
+    if (!ctx.candidatesToCursor().empty()) {
+        sentence += ctx.candidatesToCursor()[0].toString();
     }
+    fcitx::Text clientPreedit(
+        charmap().convert(sentence, false).first);
+    clientPreedit.setCursor(clientPreedit.textLength());
+    panel.setClientPreedit(clientPreedit);
+    panel.setPreedit(fcitx::Text(ctx.preedit()));
 
     auto candList = std::make_unique<fcitx::CommonCandidateList>();
     candList->setPageSize(config_.pageSize.value());
+    // 翻页保持页内高亮位置（第 x 页选第 y 项，翻页后仍指第 y 项）
+    candList->setCursorPositionAfterPaging(
+        fcitx::CursorPositionAfterPaging::SameAsLast);
     candList->setSelectionKey(fcitx::KeyList{
         fcitx::Key(FcitxKey_1), fcitx::Key(FcitxKey_2),
         fcitx::Key(FcitxKey_3), fcitx::Key(FcitxKey_4),
