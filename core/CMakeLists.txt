@@ -42,6 +42,12 @@ if(ANDROID)
 else()
     find_package(LibIMEPinyin REQUIRED)
     target_link_libraries(langya PRIVATE LibIME::Pinyin)
+    # punctuation 模块头（zh_CN 标点表与配对引号；引擎 activate 依赖该模块）。
+    # 桌面发行包提供 CONFIG 包（fcitx5-chinese-addons-devel，Fedora 布局
+    # lib64/cmake/Fcitx5ModulePunctuation）；Android 分支上方走宿主树
+    # Find 模块，两条路径互不影响。
+    find_package(Fcitx5ModulePunctuation CONFIG REQUIRED)
+    target_link_libraries(langya PRIVATE Fcitx5::Module::Punctuation)
 endif()
 # fcitx5 master 头文件使用 std::ranges/std::span（C++20）
 target_compile_features(langya PRIVATE cxx_std_20)
