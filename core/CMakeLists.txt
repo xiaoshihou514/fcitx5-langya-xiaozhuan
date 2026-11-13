@@ -23,24 +23,18 @@ if(ANDROID)
     set(CMAKE_MODULE_PATH
         ${FCITX5_CHINESE_ADDONS_CMAKE_MODULES} ${CMAKE_MODULE_PATH})
     find_package(Fcitx5ModulePunctuation MODULE)
-    # punctuation 的 prefab 产物不带 SONAME，直接链接导入目标会把
-    # IMPORTED_LOCATION 的构建机绝对路径写进 DT_NEEDED，真机上
-    # dlopen 必败（附加组件每次启动加载失败，呈「禁用」状）。
-    # 改为按文件名名义链接：DT_NEEDED 记为 libpunctuation.so，
-    # 运行时由 Android 动态链接器在宿主/插件库目录解析
-    # （宿主 APK 与本插件 APK 均打包同名库副本）。
-    get_target_property(_punct_loc Fcitx5::Module::Punctuation
-                        IMPORTED_LOCATION)
-    if(NOT _punct_loc)
-        message(FATAL_ERROR "未取得 libpunctuation.so 位置，无法安全链接")
-    endif()
-    list(GET _punct_loc 0 _punct_loc_first)
-    get_filename_component(_punct_dir "${_punct_loc_first}" DIRECTORY)
+    # punctuation 头（zh_CN 标点表与配对引号）仅需包含路径：
+    # 引擎实际不从 libpunctuation 导入任何符号（独立审核 A1 逐一
+    # 比对 176 个未定义符号，导入为 0），模块运行时由 fcitx5 的
+    # 附加组件依赖机制按需加载，链接纯多余——此前链接还曾把
+    # prefab 无 SONAME 产物的构建机绝对路径写进 DT_NEEDED 导致
+    # 真机 dlopen 必败（task-37）。且插件 APK 并不打包该库副本。
     get_target_property(_punct_inc Fcitx5::Module::Punctuation
                         INTERFACE_INCLUDE_DIRECTORIES)
+    if(NOT _punct_inc)
+        message(FATAL_ERROR "未取得 punctuation 头文件路径")
+    endif()
     target_include_directories(langya PRIVATE ${_punct_inc})
-    target_link_directories(langya PRIVATE "${_punct_dir}")
-    target_link_options(langya PRIVATE "-Wl,-l:libpunctuation.so")
 
     find_package(libime REQUIRED CONFIG)
     get_target_property(LIBIME_CMAKE_MODULES libime::cmake
