@@ -32,7 +32,7 @@ seal_hmtx = seal["hmtx"]
 upem_s = seal["head"].unitsPerEm
 upem_b = base["head"].unitsPerEm
 # upem 不同（2048 vs 1000）：按 MiSans 框重设——高度 96%em，
-# 顶对齐 0.86em（与 fix_font_metrics 同参数，按目标 upem 换算）
+# 顶对齐 0.86em（与 fonts 仓库 fonts/legacy/fix_font_metrics.py 同参数，按目标 upem 换算）
 from fontTools.pens.transformPen import TransformPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 INK_H, TOP = 0.96, 0.86

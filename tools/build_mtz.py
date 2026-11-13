@@ -74,7 +74,7 @@ def prepare_inputs() -> dict[str, Path]:
 
 
 def fix_metrics(ttf: Path) -> None:
-    """SVG 管线 TTF 的度量归一（与 fix_font_metrics.py 同参数）。"""
+    """SVG 管线 TTF 的度量归一（与 fonts 仓库 fonts/legacy/fix_font_metrics.py 同参数）。"""
     from fontTools.pens.transformPen import TransformPen
     from fontTools.pens.ttGlyphPen import TTGlyphPen
     from fontTools.ttLib import TTFont
