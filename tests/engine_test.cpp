@@ -280,6 +280,33 @@ int main() {
         check(commitIs("你好吗"), "整句一起上屏「你好吗」（K3）");
         toggleMode();  // 切回小篆
 
+        // ═══ D1 回归：楷化模式常用字语义（审计阻断项，task-42）═══
+        // zhuan 查表链修复后：二→二（非「上」）、光→光（非「水」）
+        newIC("t3c-语义回归");
+        toggleMode();
+        check(type("er"), "er 组字被吞");
+        {
+            // 候选集合成员断言（不依赖语言模型排序）：「二」在候选中，
+            // 选中后上屏「二」——映射语义正确（旧查表链会输出「上」）
+            auto cl = ic->inputPanel().candidateList();
+            int found = -1;
+            for (int i = 0; i < candCount(ic); ++i) {
+                if (cl->candidate(i).text().toString() == "二") {
+                    found = i;
+                    break;
+                }
+            }
+            check(found >= 0, "楷化候选含「二」（D1）");
+            if (found >= 0) {
+                cl->candidate(found).select(ic);
+                check(commitIs("二"), "楷化选中「二」上屏「二」（D1）");
+            }
+        }
+        check(type("guang"), "guang 组字被吞");
+        check(key("space"), "空格被吞");
+        check(commitIs("光"), "楷化 guang 首选「光」（非「水」，D1）");
+        toggleMode();
+
         // ═══ 场景组 4：非组字标点（punctuation 模块 zh_CN 表）═══
         newIC("t4-标点");
         // K2 回归：组字中按逗号＝选候选并继续输出标点（wo, → 𿕾，）

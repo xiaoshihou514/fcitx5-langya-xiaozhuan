@@ -48,10 +48,55 @@ def main() -> int:
             continue
         kai = m.kaishu_char or ch
         out_lines.append(f"{ch}\t{m.seal_cp:X}\t{kai}")
+    # 应用覆盖（白名单机制）：改写指定字的码位
+    overrides_pre = {"亲": 0x3E8DB}
+    for i, line in enumerate(out_lines):
+        ch = line.split("\t")[0]
+        if ch in overrides_pre:
+            cols = line.split("\t")
+            cols[1] = f"{overrides_pre[ch]:X}"
+            out_lines[i] = "\t".join(cols)
+
     dest = HERE.parent / "data" / "langya.map"
     dest.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
     print(f"映射 {len(out_lines)} 字（未收 {miss}），→ {dest}"
           f"（{dest.stat().st_size // 1024} KiB）", file=sys.stderr)
+
+    # ── 常用字黄金表门禁（审计 D1 建议）────────────────────────
+    # 期望值人工核对自 U3D000.pdf 码表（与 fonts/data/黄金映射.tsv
+    # 同源），防止 zhuan 查表链回归再次污染词典（变体链曾优先于
+    # 字头本字，导致 二→上、光→水 等）。不匹配即导出失败。
+    # 「滚→3DB5D 玄」「难→3DAB3 鳥」为說文正形/待裁定，暂不入表。
+    golden = {
+        "一": 0x3D000, "二": 0x3F850, "三": 0x3D066,
+        "上": 0x3D008, "下": 0x3D011,
+        "光": 0x3ED49, "白": 0x3E657, "無": 0x3F590,
+        "草": 0x3D304, "煙": 0x3ED2C, "關": 0x3F2CA,
+        "親": 0x3E8DB, "詳": 0x3D6B6, "壹": 0x3EDE2,
+        "面": 0x3E9A7, "永": 0x3F188, "龍": 0x3F268,
+        "水": 0x3EF5E, "山": 0x3EA5A, "木": 0x3DFA9,
+        "人": 0x3E66C, "舌": 0x3D429,
+        "的": 0x3E300,   # 說文正形「旳」
+    }
+
+    gold_bad = []
+    table = {}
+    for line in out_lines:
+        cols = line.split("\t")
+        table[cols[0]] = cols[1]
+    for ch, want in golden.items():
+        got = table.get(ch)
+        if got is None:
+            gold_bad.append(f"{ch}: 查表链未收（期望 U+{want:X}）")
+        elif int(got, 16) != want:
+            gold_bad.append(f"{ch}: 得 U+{got} 期望 U+{want:X}")
+    if gold_bad:
+        print("黄金表门禁失败（查表链回归？）：", file=sys.stderr)
+        for b in gold_bad:
+            print(f"  ✗ {b}", file=sys.stderr)
+        dest.unlink(missing_ok=True)
+        return 1
+    print(f"黄金表门禁通过（{len(golden)} 字）", file=sys.stderr)
     return 0
 
 
