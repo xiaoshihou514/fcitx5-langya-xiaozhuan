@@ -41,7 +41,12 @@ android {
         jniLibs {
             excludes += setOf(
                 "**/libc++_shared.so",
-                "**/libFcitx5*"
+                "**/libFcitx5*",
+                // libIME 双库与 punctuation 模块宿主 APK 自带，无需重复
+                // 打包（jyutping 同款做法；DT_NEEDED 按文件名解析到宿主副本）
+                "**/libIMECore.so",
+                "**/libIMEPinyin.so",
+                "**/libpunctuation.so"
             )
         }
     }

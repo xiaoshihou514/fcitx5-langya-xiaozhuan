@@ -282,6 +282,7 @@ task("build-android")
 
         -- 产物定位（单 ABI 注入时落在 intermediates/apk）
         local base = path.join(host, "plugin", "langya", "build")
+        local apk
         for _, d in ipairs({"outputs/apk/" .. buildType,
                             "intermediates/apk/" .. buildType}) do
             local apks = os.files(path.join(base, d, "*" .. abi .. "*.apk"))
@@ -289,10 +290,65 @@ task("build-android")
                 for _, f in ipairs(apks) do
                     print("APK：%s", f)
                 end
-                return
+                apk = apks[1]
+                break
             end
         end
-        raise("未找到 " .. abi .. " 的 APK 产物")
+        if not apk then
+            raise("未找到 " .. abi .. " 的 APK 产物")
+        end
+
+        -- 链接门禁：对未 strip 的 langya.so（cxx 产物）核对 DT_NEEDED。
+        -- 背景：prefab 的模块库普遍不带 SONAME，CMake 链接其导入目标
+        -- 时会把构建机绝对路径写进 DT_NEEDED，真机 dlopen 必败
+        -- （libpunctuation 事故，见 docs/mobile/插件差异矩阵.md）。
+        -- 规则：1) NEEDED 不得含「/」；2) 必须命中白名单。
+        local NDK = path.join(sdk, "ndk")
+        local readelf
+        for _, ver in ipairs(os.dirs(path.join(NDK, "*"))) do
+            local cand = path.join(ver, "toolchains", "llvm", "prebuilt",
+                                   "linux-x86_64", "bin", "llvm-readelf")
+            if os.isfile(cand) then
+                readelf = cand
+            end
+        end
+        local sos = os.files(path.join(base, "intermediates", "cxx", "**",
+                                       "obj", abi, "langya.so"))
+        local so = sos and sos[#sos]
+        if not readelf or not so then
+            print("警告：跳过链接门禁（未找到 llvm-readelf 或 langya.so）")
+            return
+        end
+        local needed = os.iorunv(readelf, {"-d", so})
+        local whitelist = {
+            "libFcitx5Core.so", "libFcitx5Config.so", "libFcitx5Utils.so",
+            "libIMECore.so", "libIMEPinyin.so", "libpunctuation.so",
+            "libc++_shared.so", "libm.so", "libdl.so", "libc.so", "liblog.so"
+        }
+        local fails = {}
+        for entry in needed:gmatch("NEEDED%] Shared library: %[(.-)%]") do
+            if entry:find("/", 1, true) then
+                table.insert(fails, "绝对路径：" .. entry)
+            else
+                local ok = false
+                for _, w in ipairs(whitelist) do
+                    if entry == w then
+                        ok = true
+                        break
+                    end
+                end
+                if not ok then
+                    table.insert(fails, "不在白名单：" .. entry)
+                end
+            end
+        end
+        if #fails > 0 then
+            for _, f in ipairs(fails) do
+                print("链接门禁失败：%s", f)
+            end
+            raise("DT_NEEDED 门禁未过，拒绝交付（防无 SONAME 库绝对路径回归）")
+        end
+        print("链接门禁通过：DT_NEEDED 全部为白名单内文件名")
     end)
     set_menu {
         usage = "xmake build-android",
