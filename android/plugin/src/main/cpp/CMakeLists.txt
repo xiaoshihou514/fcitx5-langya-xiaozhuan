@@ -13,6 +13,6 @@ set(CMAKE_MODULE_PATH ${FCITX5_CMAKE_MODULES} ${CMAKE_MODULE_PATH})
 find_package(ECM MODULE)
 find_package(Fcitx5Core MODULE)
 
-# 引擎核心与数据由 scripts/sync.sh 从 ../../langya 同步到本目录
-# （core/ 与 data/，勿手动修改）
+# 引擎核心与数据由仓库根的 xmake sync-android 从 langya/core 与 data/
+# 同步到本目录（勿手动修改）
 add_subdirectory(core)
