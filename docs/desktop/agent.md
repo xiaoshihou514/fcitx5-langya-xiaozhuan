@@ -115,7 +115,7 @@ langya/
 ├── data/                    # 生成的映射（xmake export-char-map 产出）
 ├── tools/                   # 数据管线与字体运维脚本（入口见 xmake 任务）
 ├── tests/                   # 引擎集成测试（xmake engine-test）
-└── android/                 # fcitx5-android 插件（见 docs/agent-android.md）
+└── android/                 # fcitx5-android 插件（见 docs/mobile/agent.md）
 ```
 
 ## 测试
