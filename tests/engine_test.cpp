@@ -295,6 +295,44 @@ int main() {
         check(key("backslash"), "反斜杠被吞并转换");
         check(commitIs("、"), "非组字反斜杠 → 「、」（顿号）");
 
+        // ═══ K4 回归：标点候选窗状态机（多映射键 [）═══
+        newIC("t4b-标点窗");
+        check(key("bracketleft"), "开窗被吞");
+        check(candCount(ic) > 0, "标点候选窗打开");
+        // 窗内字母：关窗并放行，不得漏进组字缓冲
+        check(!key("n"), "窗内字母关窗并放行（Q1）");
+        check(candCount(ic) == 0, "字母后窗口关闭");
+        // Esc：关窗吞键
+        check(key("bracketleft"), "再开窗被吞");
+        check(key("Escape"), "Esc 关窗被吞（Q2）");
+        check(candCount(ic) == 0, "Esc 后窗口关闭");
+        // 退格：关窗吞键（不得删应用字符）
+        check(key("bracketleft"), "再开窗被吞");
+        check(key("BackSpace"), "退格关窗被吞（Q3）");
+        check(candCount(ic) == 0, "退格后窗口关闭");
+        // 失焦：窗口关闭，残留不得吃掉后续按键
+        check(key("bracketleft"), "再开窗被吞");
+        ic->focusOut();
+        ic->focusIn();
+        check(candCount(ic) == 0, "失焦后窗口关闭（Q4）");
+        {
+            // Q5：残留状态不再吃键。注意上游语义：Q1 放行的字母 n 使
+            // punctuation 记录「前一字符为字母」，随后的逗号按半角
+            // 规则直出（不转换），与 K1 同源——键不被吞即为通过
+            size_t n = g_commits.size();
+            check(!key("comma"), "失焦关窗后逗号不被窗口吞键（Q5）");
+            check(g_commits.size() == n, "残留不产生意外上屏（Q5）");
+            check(key("backslash"), "顿号正常转换（窗口不吃键）");
+            check(commitIs("、"), "反斜杠 → 「、」正常转换");
+        }
+        // 数字选择标点候选
+        {
+            size_t n = g_commits.size();
+            check(key("bracketleft"), "开窗被吞");
+            check(key("2"), "数字选择候选被吞");
+            check(g_commits.size() == n + 1, "数字选中候选已上屏");
+        }
+
         // K1 回归：字母/数字后的「.」「,」为半角规则，直出给应用
         auto n1 = g_commits.size();
         check(!key("3"), "数字 3 放行");

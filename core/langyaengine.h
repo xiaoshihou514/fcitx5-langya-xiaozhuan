@@ -113,6 +113,7 @@ public:
     // 中文标点（punctuation 模块服务，zh_CN 与 fcitx5 拼音共用）
     FCITX_ADDON_DEPENDENCY_LOADER(punctuation, instance_->addonManager());
     bool handlePunc(fcitx::KeyEvent &event);
+    void handlePuncWindow(fcitx::KeyEvent &event);
 
 private:
     void updateUI(fcitx::InputContext *ic);

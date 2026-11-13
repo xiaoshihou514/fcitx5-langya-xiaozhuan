@@ -237,7 +237,9 @@ void LangyaEngine::activate(const fcitx::InputMethodEntry & /*entry*/,
 void LangyaEngine::reset(const fcitx::InputMethodEntry & /*entry*/,
                          fcitx::InputContextEvent &event) {
     auto *ic = event.inputContext();
-    state(ic)->context.clear();
+    auto *st = state(ic);
+    st->puncMode = false;   // K4：失焦/重置关闭标点候选窗，不留残留
+    st->context.clear();
     updateUI(ic);
 }
 
@@ -248,27 +250,42 @@ LangyaState *LangyaEngine::state(fcitx::InputContext *ic) {
 // 标点处理：与 PinyinEngine::handlePunc 同语义。
 // 组字时选高亮候选并吞键（标点随后续按键输出）；非组字查
 // punctuation 模块：单映射直接上屏（含配对），多映射弹候选窗。
+// 标点候选窗状态机（K4）：数字选候选；Esc/退格/空格关窗吞键；
+// 其余按键关窗并放行给应用——字母不得暗中进入组字缓冲。
+void LangyaEngine::handlePuncWindow(fcitx::KeyEvent &event) {
+    auto *ic = event.inputContext();
+    auto *st = state(ic);
+    auto close = [&]() {
+        st->puncMode = false;
+        updateUI(ic);
+    };
+    if (!event.key().hasModifier()) {
+        int idx = event.key().digitSelection();
+        if (idx >= 0) {
+            auto candList = ic->inputPanel().candidateList();
+            if (candList && idx < candList->size()) {
+                event.filterAndAccept();
+                candList->candidate(idx).select(ic);
+                st->puncMode = false;
+                return;
+            }
+        }
+    }
+    if (event.key().check(FcitxKey_Escape) ||
+        event.key().check(FcitxKey_BackSpace) ||
+        plainSym(event.key(), FcitxKey_space)) {
+        event.filterAndAccept();
+        close();
+        return;
+    }
+    close();
+}
+
 bool LangyaEngine::handlePunc(fcitx::KeyEvent &event) {
     using namespace fcitx;
     auto *ic = event.inputContext();
     auto *st = state(ic);
     auto &ctx = st->context;
-
-    // 标点候选模式：数字选映射，退格/其他键退出
-    if (st->puncMode) {
-        event.filterAndAccept();
-        auto candList = ic->inputPanel().candidateList();
-        if (candList && !event.key().hasModifier()) {
-            int idx = event.key().digitSelection();
-            if (idx >= 0 && idx < candList->size()) {
-                candList->candidate(idx).select(ic);
-                return true;
-            }
-        }
-        st->puncMode = false;
-        updateUI(ic);
-        return true;
-    }
 
     if (event.key().hasModifier() || event.isVirtual()) {
         return false;
@@ -301,10 +318,12 @@ bool LangyaEngine::handlePunc(fcitx::KeyEvent &event) {
 
     // 非组字：查 punctuation 模块（zh_CN 表）
     if (!punctuation()) {
+        FCITX_DEBUG() << "琅琊：标点模块不可用";
         return false;
     }
     auto candidates = punctuation()->call<IPunctuation::getPunctuationCandidates>(
         "zh_CN", c);
+    FCITX_DEBUG() << "琅琊标点候选数 " << candidates.size();
     if (candidates.empty()) {
         return false;   // 表外键（如 /）不拦，直出原字符
     }
@@ -359,6 +378,20 @@ void LangyaEngine::keyEvent(const fcitx::InputMethodEntry & /*entry*/,
     const auto &key = event.key();
     auto *ic = event.inputContext();
     auto *st = state(ic);
+
+    // 标点候选窗打开时优先处理（K4）：窗口内吞键或放行后均直接
+    // 返回，字母等不得漏进组字缓冲；放行按键不置 accepted，由
+    // fcitx 转发给应用。窗口状态残留自愈：面板候选已失（如失焦
+    // 重置未走 reset）时视为已关闭，本次按键回归正常处理不吞键
+    if (st->puncMode) {
+        auto puncCandList = ic->inputPanel().candidateList();
+        if (!puncCandList || puncCandList->size() == 0) {
+            st->puncMode = false;
+        } else {
+            handlePuncWindow(event);
+            return;
+        }
+    }
 
     // Ctrl+Shift+S：模式切换（大小写归一化后 sym 可为 s 或 S）
     if (key.states() == fcitx::KeyState::Ctrl_Shift
