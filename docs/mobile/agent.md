@@ -99,7 +99,7 @@ langya/android/
 │       ├── AndroidManifest.xml
 │       ├── cpp/CMakeLists.txt   # prefab fcitx5 → add_subdirectory(core)
 │       └── res/                 # plugin.xml（apiVersion 0.1）＋图标
-└── README.md                    # 一句话定位，详见 docs/agent-android.md
+└── README.md                    # 一句话定位，详见 docs/mobile/agent.md
 ```
 
 ## 与 Linux 版的差异
@@ -111,11 +111,31 @@ langya/android/
 | 引擎 .so | `install` 到 lib/fcitx5 | externalNativeBuild → jniLibs |
 | 词典数据 | install 到 share/fcitx5/langya | prebuilt-assets 打进 APK |
 
+## 真机验证
+
+本地模拟器不可用（见下节），真机步骤如下（主机装好 adb）：
+
+1. 安装：宿主官方 0.1.3（或自建带补丁宿主，见下节冷启动修复）＋
+   本仓库构建的插件 APK。插件须与宿主同版本（apiVersion 0.1）。
+2. 基线确认：`adb shell dumpsys package org.fcitx.fcitx5.android.plugin.langya | grep versionName`
+3. 冷启动验证（重点，覆盖重启后附加组件被禁用的回归）：
+   重启手机并解锁，随后
+   `adb logcat -c && adb logcat | grep -iE "fcitx|langya|DataManager|Detected plugin"`
+   预期 `Detected plugin packages:` 列表含 langya 插件包名，
+   附加组件正常加载，无 `Could not locate library langya`。
+   宿主为 debug 包时另可
+   `adb shell run-as org.fcitx.fcitx5.android cat files/data/known-plugins.txt`
+   核对插件持久记录。
+4. 功能验证：重启后直接唤起键盘，「琅琊小篆」仍在输入法列表，
+   拼音上屏小篆，无需重新添加。
+5. 异常时回传 `adb logcat -d > fcitx-boot.log`；部分国产 ROM 需在
+   系统设置放行宿主 App 的「读取应用列表」权限。
+
 ## 已知边界与路线图
 
 - 真机验证待做：本机 qemu-headless 模拟器稳定段错误（图形栈崩溃，
   与插件无关），暂无法在模拟器上联调；引擎逻辑已在 Linux 端以
-  fcitx5 testfrontend 集成测试覆盖（见 ../langya/tests）
+  fcitx5 testfrontend 集成测试覆盖（见 ../../tests）
 - 冷启动插件误禁用（已修复，2026-11）：上游宿主在冷启动（fcitx 先于
   用户解锁启动）时 PackageManager 可能解析不到插件，会把已安装插件
   当作已卸载而清空其数据，附加组件随之失效（上游 issue #410）。本
