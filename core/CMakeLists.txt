@@ -99,8 +99,12 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/langya-im.conf"
         DESTINATION "${FCITX_INSTALL_PKGDATADIR}/inputmethod"
         RENAME langya.conf
         COMPONENT config)
-# 简繁转换配置（宿主 chttrans 模块读取的 OpenCC profile）：
-# 简体→港繁用 s2hk，反向用 hk2s；conf/ 为模块配置目录
+# 简繁转换配置（chttrans 模块以 PkgConfig 类型 readAsIni("conf/chttrans.conf")
+# 读取，即配置主目录而非 PkgData；B1）。系统级安装写入 /etc/xdg/fcitx5/conf/
+#（FCITX_CONFIG_DIRS 之一，会被读取）；用户有同名配置时以用户为准。
+# Android 宿主无法下发 PkgConfig 文件，该配置在插件内不可达——
+# 不随 config 组件打包（APK 不再有读不到的死文件），Android 侧
+# 简繁档位维持 OpenCC 默认（标准繁体）。
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/chttrans.conf"
-        DESTINATION "${FCITX_INSTALL_PKGDATADIR}/conf"
+        DESTINATION "/etc/xdg/fcitx5/conf"
         COMPONENT config)

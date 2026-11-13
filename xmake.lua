@@ -184,17 +184,23 @@ target("langya")
                 print("提示：缺 lib" .. mod .. ".so，跳过该模块")
             end
         end
-        -- 用户级配置：简→繁用香港标准（s2hk），繁→简用 hk2s
+        -- 用户级配置：简→繁用香港标准（s2hk），繁→简用 hk2s。
+        -- 键必须为顶层（chttrans 配置定义即顶层键，分组写法会被忽略，
+        -- B1）；Hotkey 为列表项须经 [Hotkey] 枚举。已有用户配置时
+        -- 不覆盖（B2：不得改写用户正在用的档位），仅提示
         local confdir = path.join(home, ".config", "fcitx5", "conf")
         os.mkdir(confdir)
-        io.writefile(path.join(confdir, "chttrans.conf"),
-                     "# 简繁转换（OpenCC）：香港繁体标准\n"
-                     .. "[OpenCC]\n"
-                     .. "# 简体 -> 港繁；反向用港繁专用表\n"
-                     .. "OpenCCS2TProfile=s2hk.json\n"
-                     .. "OpenCCT2SProfile=hk2s.json\n"
-                     .. "# 切换键（fcitx5 默认）\n"
-                     .. "Hotkey=Control+Shift+F\n")
+        local usercht = path.join(confdir, "chttrans.conf")
+        if os.isfile(usercht) then
+            print("提示：已存在用户 chttrans 配置（" .. usercht
+                .. "），未覆盖；港繁档位请按需手工调整")
+        else
+            io.writefile(usercht,
+                         "# 简繁转换（OpenCC）：香港繁体标准（琅琊写入）\n"
+                         .. "OpenCCS2TProfile=s2hk.json\n"
+                         .. "OpenCCT2SProfile=hk2s.json\n"
+                         .. "\n[Hotkey]\n0=Control+Shift+F\n")
+        end
 
         -- addon 搜索路径（fcitx5 不默认搜 ~/.local/lib/fcitx5）：
         -- environment.d 对 systemd 用户会话生效（KDE Wayland 需重新登录）
