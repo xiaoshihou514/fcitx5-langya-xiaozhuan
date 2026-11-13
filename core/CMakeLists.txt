@@ -99,6 +99,11 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/langya-im.conf"
 # Android 宿主无法下发 PkgConfig 文件，该配置在插件内不可达——
 # 不随 config 组件打包（APK 不再有读不到的死文件），Android 侧
 # 简繁档位维持 OpenCC 默认（标准繁体）。
-install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/chttrans.conf"
-        DESTINATION "/etc/xdg/fcitx5/conf"
-        COMPONENT config)
+if(NOT ANDROID)
+    # 桌面：随前缀的可移植系统配置路径（GNUInstallDirs SYSCONFDIR，
+    # 通常 etc/xdg/fcitx5/conf；非 root 前缀安装亦可落盘）。
+    # Android：宿主无法下发 PkgConfig 文件，不打包死文件（B1）。
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/chttrans.conf"
+            DESTINATION "${CMAKE_INSTALL_SYSCONFDIR}/xdg/fcitx5/conf"
+            COMPONENT config)
+endif()

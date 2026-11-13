@@ -48,14 +48,30 @@ def main() -> int:
             continue
         kai = m.kaishu_char or ch
         out_lines.append(f"{ch}\t{m.seal_cp:X}\t{kai}")
-    # 应用覆盖（白名单机制）：改写指定字的码位
-    overrides_pre = {"亲": 0x3E8DB}
-    for i, line in enumerate(out_lines):
+    # 覆盖表（同 fonts/data/映射白名单机制）：审计确认的语义借形错映
+    # 显式指定期望（码位＋楷化列一并改写——复验④：只改篆形列会让
+    # 楷化模式仍上屏借形字，如 亲→榛）
+    overrides_pre = {
+        "亲": (0x3E8DB, "親"),
+        "园": (0x3E1D9, "園"),
+        "历": (0x3D4B1, "歷"),
+        "柳": (0x3E016, "桺"),   # 說文作「桺」
+        "愈": (0x3E5F4, "瘉"),
+    }
+    # 语义借形且說文未收/无字头：不映射，引擎按原字回退
+    # （磁→瓷、氯→綠、吨→啍、肆→四、谭→談 均为错误借形）
+    uncollected = {"磁", "氯", "吨", "肆", "谭"}
+    kept = []
+    for line in out_lines:
         ch = line.split("\t")[0]
+        if ch in uncollected:
+            continue
         if ch in overrides_pre:
-            cols = line.split("\t")
-            cols[1] = f"{overrides_pre[ch]:X}"
-            out_lines[i] = "\t".join(cols)
+            seal, kai = overrides_pre[ch]
+            kept.append(f"{ch}\t{seal:X}\t{kai}")
+        else:
+            kept.append(line)
+    out_lines = kept
 
     dest = HERE.parent / "data" / "langya.map"
     dest.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
@@ -89,21 +105,21 @@ def main() -> int:
     }
 
     gold_bad = []
-    table = {}
+    table = {}          # char -> (seal_hex, kai)
     for line in out_lines:
         cols = line.split("\t")
-        table[cols[0]] = cols[1]
+        table[cols[0]] = (cols[1], cols[2])
     for ch, want in golden.items():
         got = table.get(ch)
         if want == "":
             if got is not None:
                 gold_bad.append(
-                    f"{ch}: 說文未收字不得映射（实际 U+{got}）")
+                    f"{ch}: 說文未收字不得映射（实际 U+{got[0]}）")
             continue
         if got is None:
             gold_bad.append(f"{ch}: 查表链未收（期望 U+{want:X}）")
-        elif int(got, 16) != want:
-            gold_bad.append(f"{ch}: 得 U+{got} 期望 U+{want:X}")
+        elif int(got[0], 16) != want:
+            gold_bad.append(f"{ch}: 得 U+{got[0]} 期望 U+{want:X}")
     if gold_bad:
         print("黄金表门禁失败（查表链回归？）：", file=sys.stderr)
         for b in gold_bad:
