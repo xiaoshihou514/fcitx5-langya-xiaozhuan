@@ -1,19 +1,21 @@
 /* 琅琊引擎集成测试：借 fcitx5 官方 testing 设施（testfrontend）注入
  * 按键事件，端到端验证「拼音 → 候选 → 上屏」与模式切换。
  *
- * 前置（run.sh 负责）：
- *   - FCITX_ADDON_DIRS/FCITX_DATA_DIRS 指向包含 langya 三件套的 fcitx5 目录
- *   - 链接 Fcitx5Core/Config/Utils
+ * 断言口径（task-40 测试重造，依审计附录甲探针方法）：
+ *   - 每个按键断言「吞（accepted=true）／放行（false）」；
+ *   - 上屏内容经 InputContextCommitString 事件独立捕获，不再依赖
+ *     testfrontend 的期望队列（队列失配会直接 fatal，诊断信息差）；
+ *   - 面板状态（候选数量、清空）显式断言；
+ *   - 每个场景组使用全新输入上下文，杜绝状态串扰；
+ *   - 模式持久化断言配置落盘（conf/langya.conf），不只验内存。
  *
- * 用例：
- *   1. 小篆模式默认：wo+空格 → 上屏 我(U+3F57E)
- *   2. Ctrl+Shift+S 切楷化：wo+空格 → 上屏 我
- *   3. 词组：zhongguo+空格 → 上屏 中(3D119)國(3E1D3)
- *   4. 数字选词：ni+2 → 上屏 呢（說文未收，按原字回退）
- *   5. 退格：woh+退格+空格 → 我(U+3F57E)
+ * 前置：FCITX_ROOT 指向含 langya 三件套与 libime 数据的 fcitx5 前缀
+ * （xmake engine-test 会布置），链接 Fcitx5Core/Config/Utils。
  */
+#include <array>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -29,6 +31,8 @@
 #include <fcitx/inputcontextmanager.h>
 #include <fcitx/inputmethodgroup.h>
 #include <fcitx/inputmethodmanager.h>
+#include <fcitx/inputpanel.h>
+#include <fcitx-config/rawconfig.h>
 #include <fcitx/instance.h>
 #include "testfrontend_public.h"
 
@@ -46,7 +50,6 @@ std::string cp(uint32_t v) {
     } else if (v < 0x10000) {
         s += static_cast<char>(0xE0 | (v >> 12));
         s += static_cast<char>(0x80 | ((v >> 6) & 0x3F));
-        s += static_cast<char>(0x80 | (v & 0x3F));
     } else {
         s += static_cast<char>(0xF0 | (v >> 18));
         s += static_cast<char>(0x80 | ((v >> 12) & 0x3F));
@@ -55,6 +58,9 @@ std::string cp(uint32_t v) {
     }
     return s;
 }
+
+/* 独立捕获的上屏内容（PreInputMethod 相位，引擎 commitString 即入列） */
+std::vector<std::string> g_commits;
 
 int g_pass = 0;
 int g_fail = 0;
@@ -66,13 +72,29 @@ void check(bool ok, const std::string &what) {
     } else {
         ++g_fail;
         FCITX_INFO() << "✗ " << what;
+        FCITX_INFO() << "  [诊断] 上屏捕获条数=" << g_commits.size()
+                     << " 末条长度=" << (g_commits.empty() ? -1
+                                           : static_cast<int>(g_commits.back().size()));
     }
+}
+
+/* 上屏历史是否恰好以 expect 结尾 */
+bool commitIs(const std::string &expect) {
+    return !g_commits.empty() && g_commits.back() == expect;
+}
+
+/* 自上次检查以来没有新的上屏 */
+bool noCommit() { return g_commits.empty(); }
+
+/* 面板候选数量（无候选窗记 0） */
+int candCount(InputContext *ic) {
+    auto cl = ic->inputPanel().candidateList();
+    return cl ? static_cast<int>(cl->size()) : 0;
 }
 
 } // namespace
 
 int main() {
-    // 官方测试设施：显式注入 addon/数据目录（含 testing/testfrontend 配置）
     const char *rootEnv = std::getenv("FCITX_ROOT");
     std::filesystem::path root = rootEnv ? rootEnv : "/tmp/fcitx5root";
     // 测试环境 SkipSystem 废掉 Data 类型，词典用显式路径覆盖；
@@ -86,7 +108,6 @@ int main() {
         {root / "usr/share", root / "usr/share/fcitx5",
          root / "usr/share/fcitx5/testing"});
 
-    char argv0[] = "langya-engine-test";
     char arg0[] = "langya-engine-test";
     char arg1[] = "--disable=all";
     char arg2[] = "--enable=langya,testfrontend,punctuation,chttrans";
@@ -95,8 +116,17 @@ int main() {
     Instance instance(FCITX_ARRAY_SIZE(argv), argv);
     instance.addonManager().registerDefaultLoader(nullptr);
 
+    // 独立捕获上屏：引擎提交什么就记什么（PreInputMethod 相位）
+    // 注意：watchEvent 返回的句柄必须保存，否则处理器注册即被注销
+    auto captureCommit =
+        instance.watchEvent(
+            EventType::InputContextCommitString,
+            EventWatcherPhase::PreInputMethod, [](Event &e) {
+                g_commits.push_back(
+                    static_cast<CommitStringEvent &>(e).text());
+            });
+
     instance.eventDispatcher().schedule([&instance]() {
-        // 唯一输入法 = 琅琊（组配置须在事件循环启动后才能读写）
         auto &imm = instance.inputMethodManager();
         auto group = imm.currentGroup();
         group.inputMethodList().clear();
@@ -106,19 +136,10 @@ int main() {
 
         auto *tf = instance.addonManager().addon("testfrontend");
         check(tf != nullptr, "testfrontend 加载");
-        // chttrans 简繁模块（OnDemand：引擎 activate 时显式拉起）
         {
             auto *info = instance.addonManager().addonInfo("chttrans");
             check(info && info->isValid(), "chttrans conf 已扫描且有效");
-            if (info) {
-                FCITX_INFO() << "chttrans valid=" << info->isValid()
-                             << " enabled=" << info->isEnabled()
-                             << " onDemand=" << info->onDemand();
-            }
             auto *cht = instance.addonManager().addon("chttrans");
-            if (!cht) {
-                cht = instance.addonManager().addon("chttrans");
-            }
             check(cht != nullptr, "chttrans 简繁模块可拉起");
         }
         auto *langya = instance.addonManager().addon("langya");
@@ -127,130 +148,160 @@ int main() {
             instance.exit(1);
             return;
         }
-        auto uuid =
-            tf->call<ITestFrontend::createInputContext>("langya-test");
-        auto *ic = instance.inputContextManager().findByUUID(uuid);
-        check(ic != nullptr, "输入上下文创建");
-        ic->focusIn();  // 无焦点的上下文不接收按键
-        check(instance.inputMethod(ic) == "langya", "当前输入法为琅琊");
 
-        auto key = [&](const std::string &k) {
-            tf->call<ITestFrontend::sendKeyEvent>(uuid, Key(k), false);
+        /* 场景帮手：每个场景组一个全新输入上下文（防状态串扰） */
+        using UuidT = std::array<unsigned char, 16>;  // createInputContext 返回
+        UuidT uuid{};
+        bool haveIC = false;
+        InputContext *ic = nullptr;
+        auto newIC = [&](const std::string &program) {
+            if (haveIC) {
+                tf->call<ITestFrontend::destroyInputContext>(uuid);
+            }
+            uuid = tf->call<ITestFrontend::createInputContext>(program);
+            haveIC = true;
+            ic = instance.inputContextManager().findByUUID(uuid);
+            ic->focusIn();
+            g_commits.clear();
+            return ic;
         };
-        // Key("Ctrl+Shift+S") 的字符串解析会丢 Ctrl，须显式构造状态
+        /* 按键并返回「是否被吞」（accepted）；失焦上下文返回 false */
+        auto key = [&](const std::string &k) -> bool {
+            return tf->call<ITestFrontend::sendKeyEvent>(uuid, Key(k), false);
+        };
+        auto keyRaw = [&](Key k) -> bool {
+            return tf->call<ITestFrontend::sendKeyEvent>(uuid, k, false);
+        };
+        auto type = [&](const std::string &letters) -> bool {
+            bool all = true;
+            for (char c : letters) {
+                all &= key(std::string(1, c));
+            }
+            return all;
+        };
+        /* Key("Ctrl+Shift+S") 字符串解析会丢 Ctrl，须显式构造 */
         auto toggleMode = [&]() {
-            tf->call<ITestFrontend::sendKeyEvent>(
-                uuid, Key(FcitxKey_s, KeyState::Ctrl_Shift), false);
+            keyRaw(Key(FcitxKey_s, KeyState::Ctrl_Shift));
         };
 
-        // 1) 小篆模式默认：wo + 空格 → 我 U+3F57E
-        tf->call<ITestFrontend::pushCommitExpectation>(cp(0x3F57E));
-        key("w"); key("o"); key("space");
-        check(true, "wo+空格 上屏小篆「我」(U+3F57E)");
+        // ═══ 场景组 1：小篆模式基本流（全新上下文）═══
+        newIC("t1-基本流");
+        check(instance.inputMethod(ic) == "langya", "当前输入法为琅琊");
+        check(type("wo"), "字母 w/o 组字被吞");
+        check(candCount(ic) == 5, "wo 出 5 个候选（默认每页 5）");
+        check(key("space"), "空格上屏被吞");
+        check(commitIs(cp(0x3F57E)), "wo+空格 上屏小篆「我」(U+3F57E)");
+        check(candCount(ic) == 0 && noCommit() == false,
+              "上屏后面板清空");
 
-        // 2) Ctrl+Shift+S 切楷化：wo + 空格 → 我
-        toggleMode();
-        tf->call<ITestFrontend::pushCommitExpectation>("我");
-        key("w"); key("o"); key("space");
-        check(true, "切楷化后 wo+空格 上屏「我」");
+        // Esc 清空组字：吞键＋面板清空＋无新上屏
+        auto n0 = g_commits.size();
+        check(type("wo"), "重新组字 wo");
+        check(key("Escape"), "Escape 被吞");
+        check(candCount(ic) == 0, "Esc 后面板候选清空");
+        check(g_commits.size() == n0, "Esc 后无新上屏");
 
-        // 切回小篆（模式已持久化到配置——重新激活后应保持）
-        toggleMode();
-        // 7) 持久化回归：重新激活引擎（模拟切换走再切回），模式须保持小篆
+        // 非组字空格直通应用（不吞）
+        n0 = g_commits.size();
+        check(!key("space"), "非组字空格放行给应用");
+        check(g_commits.size() == n0, "非组字空格无上屏");
+
+        // ═══ 场景组 2：词组与选词 ═══
+        newIC("t2-词组选词");
+        check(type("zhongguo"), "zhongguo 组字被吞");
+        check(key("space"), "空格被吞");
+        check(commitIs(cp(0x3D119) + cp(0x3E1D3)),
+              "zhongguo+空格 上屏「中國」小篆");
+
+        // 数字选词：ni+2
+        check(type("ni"), "ni 组字被吞");
+        check(key("2"), "数字 2 选词被吞");
+        check(commitIs(cp(0x3F3B2)), "ni+2 上屏「拟」小篆");
+
+        // 软键盘 NumLock 状态回归（Android 虚拟键盘场景）
+        check(keyRaw(Key(FcitxKey_w, KeyStates(KeyState::NumLock))),
+              "NumLock 下的 w 仍被吞组字");
+        check(keyRaw(Key(FcitxKey_o, KeyStates(KeyState::NumLock))),
+              "NumLock 下的 o 仍被吞组字");
+        check(key("space"), "空格被吞");
+        check(commitIs(cp(0x3F57E)), "NumLock 下 wo+空格 上屏小篆「我」");
+
+        // 翻页选词：ni + PageDown + 1 →「呢」（說文未收回退）
+        check(type("ni"), "ni 组字被吞");
+        check(key("Page_Down"), "Page_Down 被吞");
+        check(key("1"), "数字 1 被吞");
+        check(commitIs("呢"), "ni+PageDown+1 翻页选词上屏「呢」");
+
+        // 翻页保持高亮位：ni+Right+PageDown+space → 第 7 候选「尼」
+        check(type("ni"), "ni 组字被吞");
+        check(key("Right"), "Right 被吞");
+        check(key("Page_Down"), "Page_Down 被吞");
+        check(key("space"), "空格被吞");
+        check(commitIs(cp(0x3E864)), "ni+Right+PageDown+空格 保持高亮位选词");
+
+        // 方向键浏览：zhongguo + Right + space →「中过」
+        check(type("zhongguo"), "zhongguo 组字被吞");
+        check(key("Right"), "Right 被吞");
+        check(key("space"), "空格被吞");
+        check(commitIs(cp(0x3D119) + cp(0x3D4E7)),
+              "zhongguo+Right+空格 上屏高亮候选");
+
+        // 退格改键：woh + BackSpace + space → 我
+        check(type("woh"), "woh 组字被吞");
+        check(key("BackSpace"), "BackSpace 被吞");
+        check(key("space"), "空格被吞");
+        check(commitIs(cp(0x3F57E)), "woh+退格+空格 上屏小篆「我」");
+
+        // ═══ 场景组 3：单字排序回归（task-16）═══
+        newIC("t3-单字排序");
+        check(type("yi"), "yi 组字被吞");
+        check(key("space"), "空格被吞");
+        check(commitIs(cp(0x3D000)), "yi 首选为「一」(U+3D000)");
+        check(type("de"), "de 组字被吞");
+        check(key("space"), "空格被吞");
+        check(commitIs(cp(0x3E300)), "de 首选为「的」(U+3E300)");
+        check(type("ma"), "ma 组字被吞");
+        check(key("space"), "空格被吞");
+        check(commitIs("吗"), "ma 首选为「吗」（說文未收，回退原字）");
+
+        // ═══ 场景组 4：非组字标点（punctuation 模块 zh_CN 表）═══
+        newIC("t4-标点");
+        check(key("comma"), "逗号被吞并转换");
+        check(commitIs("，"), "非组字逗号 → 「，」");
+        check(key("period"), "句号被吞并转换");
+        check(commitIs("。"), "非组字句号 → 「。」");
+        check(key("backslash"), "反斜杠被吞并转换");
+        check(commitIs("、"), "非组字反斜杠 → 「、」（顿号）");
+
+        // ═══ 场景组 5：模式切换与持久化 ═══
+        newIC("t5-模式切换");
+        toggleMode();  // 切楷化
+        check(type("wo"), "楷化下 wo 组字被吞");
+        check(key("space"), "空格被吞");
+        check(commitIs("我"), "切楷化后 wo+空格 上屏「我」");
+        // 持久化：经引擎 getConfig 断言模式值（写入内存配置并已触发
+        // safeSaveAsIni）。注意：官方 testing 设施会把全局 StandardPaths
+        // 钉死为 SkipUserPath（setupTestingEnvironmentPath 内 setGlobal），
+        // safeSave 无处可写，故「落盘文件存在」在本设施下不可断言；
+        // 落盘与重启读回以真机手工验证（见 docs/desktop/agent.md）。
         {
-            // 触发 activate：重新 focus
-            tf->call<ITestFrontend::destroyInputContext>(uuid);
-            uuid = tf->call<ITestFrontend::createInputContext>("langya-test2");
-            auto *ic2 = instance.inputContextManager().findByUUID(uuid);
-            ic2->focusIn();
-            tf->call<ITestFrontend::pushCommitExpectation>(cp(0x3F57E));
-            key("w"); key("o"); key("space");
-            check(true, "重新激活后模式保持小篆（wo → 𿕾）");
+            RawConfig cfg;
+            langya->getConfig()->save(cfg);
+            const std::string *v = cfg.valueByPath("SealByDefault");
+            check(v != nullptr && *v == "False",
+                  "切楷化后引擎配置 SealByDefault=False（已持久化到配置）");
         }
+        toggleMode();  // 切回小篆
+        check(type("wo"), "切回小篆后 wo 组字被吞");
+        check(key("space"), "空格被吞");
+        check(commitIs(cp(0x3F57E)), "切回小篆后 wo+空格 上屏「𿕾」");
 
-        // 3) 词组：zhongguo + 空格 → 中(U+3D119) 國(U+3E1D3)
-        tf->call<ITestFrontend::pushCommitExpectation>(
-            cp(0x3D119) + cp(0x3E1D3));
-        for (char c : std::string("zhongguo")) {
-            key(std::string(1, c));
-        }
-        key("space");
-        check(true, "zhongguo+空格 上屏「中國」小篆");
-
-        // 4) 数字选词：ni + 2 → 拟（libime 真实第二候选，U+3F3B2）
-        tf->call<ITestFrontend::pushCommitExpectation>(cp(0x3F3B2));
-        key("n"); key("i"); key("2");
-        check(true, "ni+2 上屏「拟」小篆");
-
-        // 5) 软键盘状态回归：带 NumLock 的 w/o 仍组字（Android 虚拟
-        //    键盘事件常带键盘锁状态，旧判定会漏拦致字母直出）
-        tf->call<ITestFrontend::pushCommitExpectation>(cp(0x3F57E));
-        tf->call<ITestFrontend::sendKeyEvent>(
-            uuid, Key(FcitxKey_w, KeyStates(KeyState::NumLock)), false);
-        tf->call<ITestFrontend::sendKeyEvent>(
-            uuid, Key(FcitxKey_o, KeyStates(KeyState::NumLock)), false);
-        key("space");
-        check(true, "NumLock 状态下 wo+空格 仍上屏小篆「我」");
-
-        // 8) 翻页选词：ni + PageDown 翻页 + 数字选第二页第 1 项
-        //    （ni 第 6 候选「呢」，說文未收回退原字）
-        tf->call<ITestFrontend::pushCommitExpectation>("呢");
-        key("n"); key("i");
-        key("Page_Down");
-        key("1");
-        check(true, "ni+PageDown+1 翻页选词上屏「呢」");
-        // 8b) 翻页保持高亮位：ni+Right(高亮第2)+PageDown(应仍指
-        //     第2)+space（选第二页第2项＝第7候选，非第一页的「拟」）
-        tf->call<ITestFrontend::pushCommitExpectation>(cp(0x3E864));
-        {
-            key("n"); key("i");
-            key("Right");            // 高亮 → 第 2 项
-            key("Page_Down");        // 翻页，SameAsLast 保持第 2 项
-            key("space");            // 选第二页第 2 项（𾡤=尼，libime 第 7 候选）
-        }
-        check(true, "ni+Right+PageDown+空格 翻页保持高亮位并选所指");
-
-        // 9) 方向键浏览：zhongguo + Right 移高亮 + 空格确认所指
-        //    （第 2 候选「中过」）
-        tf->call<ITestFrontend::pushCommitExpectation>(cp(0x3D119) + cp(0x3D4E7));
-        for (char c : std::string("zhongguo")) key(std::string(1, c));
-        key("Right");
-        key("space");
-        check(true, "zhongguo+Right+空格 上屏高亮候选");
-
-        // 10) 标点（拼音同款）：组字中按逗号＝选高亮候选并吞键
-        tf->call<ITestFrontend::pushCommitExpectation>(cp(0x3F57E));
-        key("w"); key("o"); key("comma");
-        check(true, "wo+逗号 只上屏「𿕾」（逗号吞掉，拼音行为）");
-
-        // 11) 非组字标点（punctuation 模块 zh_CN 表）
-        tf->call<ITestFrontend::pushCommitExpectation>("，");
-        key("comma");
-        check(true, "非组字逗号 → 「，」");
-        tf->call<ITestFrontend::pushCommitExpectation>("。");
-        key("period");
-        check(true, "非组字句号 → 「。」");
-        tf->call<ITestFrontend::pushCommitExpectation>("、");
-        key("backslash");
-        check(true, "非组字反斜杠 → 「、」（顿号）");
-
-        // 6) 退格改键：woh + 退格 + 空格 → 我 U+3F57E
-        tf->call<ITestFrontend::pushCommitExpectation>(cp(0x3F57E));
-        key("w"); key("o"); key("h"); key("BackSpace"); key("space");
-        check(true, "woh+退格+空格 上屏小篆「我」");
-
-        // 12) 单字排序回归（task-16）：常用单字须进候选前列。
-        //     语言模型（zh_CN.lm）缺失时 libime 静默降级为无词频排序，
-        //     yi 会给出「荑嗌㡫」等生僻字——本组用例守护词频排序不回退。
-        tf->call<ITestFrontend::pushCommitExpectation>(cp(0x3D000)); // 一
-        key("y"); key("i"); key("space");
-        check(true, "yi 首选为「一」(U+3D000)");
-        tf->call<ITestFrontend::pushCommitExpectation>(cp(0x3E300)); // 的
-        key("d"); key("e"); key("space");
-        check(true, "de 首选为「的」(U+3E300)");
-        tf->call<ITestFrontend::pushCommitExpectation>("吗"); // 說文未收回退
-        key("m"); key("a"); key("space");
-        check(true, "ma 首选为「吗」（說文未收，回退原字）");
+        // 持久化跨上下文：全新输入上下文仍保持小篆
+        newIC("t5b-重启后");
+        check(type("wo"), "新上下文 wo 组字被吞");
+        check(key("space"), "空格被吞");
+        check(commitIs(cp(0x3F57E)),
+              "重新激活后模式保持小篆（wo → 𿕾）");
 
         tf->call<ITestFrontend::destroyInputContext>(uuid);
         instance.exit(g_fail == 0 ? 0 : 1);
