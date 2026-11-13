@@ -5,7 +5,13 @@ Category=InputMethod
 Version=@PROJECT_VERSION@
 Library=langya
 Type=SharedLibrary
-OnDemand=True
+# 随 fcitx 启动加载（不惰性拉起）：
+# 1) fcitx5-android 附加组件配置页在插件未加载时拿不到 cfg/desc，
+#    会显示「可能在 fcitx 启动时处于禁用状态」（task-34 缺陷），
+#    OnDemand=False 使插件启动即加载，配置页恒可用；
+# 2) fcitx5 无 addon 加载超时/watchdog，构造耗时无超时风险；
+# 3) 桌面安装侧与集成测试本就按 OnDemand=False 布置，行为一致。
+OnDemand=False
 Configurable=True
 
 # punctuation：中文标点服务（zh_CN 映射与配对/多候选状态机，
@@ -14,6 +20,6 @@ Configurable=True
 0=punctuation
 
 # chttrans：简繁转换（OpenCC 后端，港繁 profile 由用户级
-# conf/chttrans.conf 提供）。OnDemand 模块须由引擎声明依赖拉起
+# conf/chttrans.conf 提供）。引擎已声明依赖，由 fcitx5 按依赖序拉起
 [Addon/OptionalDependencies]
 0=chttrans
