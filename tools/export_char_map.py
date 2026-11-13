@@ -56,7 +56,9 @@ def main() -> int:
         "园": (0x3E1D9, "園"),
         "历": (0x3D4B1, "歷"),
         "柳": (0x3E016, "桺"),   # 說文作「桺」
-        "愈": (0x3E5F4, "瘉"),
+        "愈": (0x3E5B4, "瘉"),  # 查表链正形；sw_pos 另登记 3E5F4（实为圓系字形）
+        "他": (0x3F834, "它"),  # 借「它」形（v0.1.4 撤除后按裁定恢复）
+        "她": (0x3F834, "它"),  # 同上
     }
     # 语义借形且說文未收/无字头：不映射，引擎按原字回退
     # （磁→瓷、氯→綠、吨→啍、肆→四、谭→談 均为错误借形）
@@ -72,6 +74,12 @@ def main() -> int:
         else:
             kept.append(line)
     out_lines = kept
+    # 查表链撤除但裁定保留的映射：直接补行
+    present = {l.split("\t")[0] for l in out_lines}
+    for ch, (seal, kai) in overrides_pre.items():
+        if ch not in present:
+            out_lines.append(f"{ch}\t{seal:X}\t{kai}")
+    out_lines.sort()
 
     dest = HERE.parent / "data" / "langya.map"
     dest.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
@@ -98,7 +106,7 @@ def main() -> int:
         "水": 0x3EF5E, "山": 0x3EA5A, "木": 0x3DFA9,
         "人": 0x3E66C, "舌": 0x3D429,
         "的": 0x3E300,   # 說文正形「旳」
-        "难": 0x3DAB3,   # 說文「難，鳥也」，本义正形（裁定保留）
+        "难": "",        # 裁定回退未收（說文借形不语义化；v0.1.4 落地）
         "滚": "",        # 說文未收：必须回退（不得映射任何码位）
         "他": 0x3F834,   # 人工裁定
         "她": 0x3F834,   # 人工裁定
