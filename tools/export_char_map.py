@@ -68,8 +68,10 @@ def main() -> int:
     # 字头本字，导致 二→上、光→水 等）。不匹配即导出失败。
     # 「难→3DAB3 鳥」：說文「難，鳥也」，鸟形即本义正形（lead 裁定
     # 保留并白名单豁免，用户感知差异已文档注明）；
-    # 「滚→3DB5D 玄」为疑似数据残留错映（滚 后起字、說文未收），
-    # font-lead 核实变体边出处后裁定，届时改期望为「說文未收」回退。
+    # 「滚」：後起字，說文未收——正确行为为「說文未收」回退
+    # （font-lead 已核实变体边 滚→𬺤→玄 系数据残留错误并删除，
+    # modern_map 重导后滚不再映射）；黄金表按未收断言。
+    # 「他/她」：人工裁定 3F834。
     golden = {
         "一": 0x3D000, "二": 0x3F850, "三": 0x3D066,
         "上": 0x3D008, "下": 0x3D011,
@@ -81,6 +83,9 @@ def main() -> int:
         "人": 0x3E66C, "舌": 0x3D429,
         "的": 0x3E300,   # 說文正形「旳」
         "难": 0x3DAB3,   # 說文「難，鳥也」，本义正形（裁定保留）
+        "滚": "",        # 說文未收：必须回退（不得映射任何码位）
+        "他": 0x3F834,   # 人工裁定
+        "她": 0x3F834,   # 人工裁定
     }
 
     gold_bad = []
@@ -90,6 +95,11 @@ def main() -> int:
         table[cols[0]] = cols[1]
     for ch, want in golden.items():
         got = table.get(ch)
+        if want == "":
+            if got is not None:
+                gold_bad.append(
+                    f"{ch}: 說文未收字不得映射（实际 U+{got}）")
+            continue
         if got is None:
             gold_bad.append(f"{ch}: 查表链未收（期望 U+{want:X}）")
         elif int(got, 16) != want:
