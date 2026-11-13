@@ -102,17 +102,60 @@ target("langya")
         local confroot = path.join(target:autogendir(), "conf")
         local root = os.getenv("FCITX_ROOT") or "/tmp/fcitx5root"
 
+        -- B2：探测系统 fcitx5 安装（pkg-config，回退常见前缀）。
+        -- 系统已提供的模块、库、数据一律不复制、不遮蔽
+        local sysprefix = nil
+        local out = os.iorunv("pkg-config",
+                              {"--variable=prefix", "Fcitx5Core"})
+        if out then
+            sysprefix = out:strip()
+        end
+        if not sysprefix or sysprefix == "" then
+            for _, cand in ipairs({"/usr", "/usr/local"}) do
+                if os.isfile(path.join(cand, "lib64", "fcitx5",
+                                       "libclassicui.so"))
+                    or os.isfile(path.join(cand, "lib", "fcitx5",
+                                           "libclassicui.so")) then
+                    sysprefix = cand
+                    break
+                end
+            end
+        end
+        local syslibaddon = nil   -- 系统模块目录（lib*/fcitx5）
+        local sysshare = nil      -- 系统数据目录（share/fcitx5）
+        if sysprefix and sysprefix ~= "" then
+            syslibaddon = (os.isfile(path.join(sysprefix, "lib64", "fcitx5"))
+                and path.join(sysprefix, "lib64", "fcitx5"))
+                or (os.isfile(path.join(sysprefix, "lib", "fcitx5"))
+                and path.join(sysprefix, "lib", "fcitx5"))
+            sysshare = path.join(sysprefix, "share", "fcitx5")
+        end
+
+        -- 安装清单：卸载按清单逐项删除，不留遮蔽残骸（B2）
+        local manifest = {}
+
+        local function install_file(src, dst)
+            os.cp(src, dst)
+            table.insert(manifest, dst)
+        end
+
         -- 引擎与 libime 同目录（$ORIGIN 互相可见）
         local libdir_ = path.join(inst, "lib", "fcitx5")
         os.mkdir(libdir_)
-        os.cp(target:targetfile(), path.join(libdir_, "langya.so"))
-        for _, so in ipairs(os.files(path.join(root, "usr", "lib64",
-                                               "libIMECore.so*"))) do
-            os.cp(so, libdir_)
-        end
-        for _, so in ipairs(os.files(path.join(root, "usr", "lib64",
-                                               "libIMEPinyin.so*"))) do
-            os.cp(so, libdir_)
+        install_file(target:targetfile(), path.join(libdir_, "langya.so"))
+        -- libime 核心：系统（含发行版 libime 包）已提供则不复制
+        if sysprefix and os.isfile(path.join(sysprefix, "lib64",
+                                             "libIMECore.so.0")) then
+            print("系统已提供 libIME，跳过复制（不遮蔽）")
+        else
+            for _, so in ipairs(os.files(path.join(root, "usr", "lib64",
+                                                   "libIMECore.so*"))) do
+                install_file(so, libdir_)
+            end
+            for _, so in ipairs(os.files(path.join(root, "usr", "lib64",
+                                                   "libIMEPinyin.so*"))) do
+                install_file(so, libdir_)
+            end
         end
 
         -- fcitx5 注册文件与琅琊映射
@@ -120,34 +163,46 @@ target("langya")
         os.mkdir(path.join(share, "fcitx5", "addon"))
         os.mkdir(path.join(share, "fcitx5", "inputmethod"))
         os.mkdir(path.join(share, "fcitx5", "langya"))
-        os.cp(path.join(confroot, confdir, "addon", "langya.conf"),
-              path.join(share, "fcitx5", "addon"))
-        os.cp(path.join(confroot, confdir, "inputmethod", "langya.conf"),
-              path.join(share, "fcitx5", "inputmethod"))
+        install_file(path.join(confroot, confdir, "addon", "langya.conf"),
+                     path.join(share, "fcitx5", "addon"))
+        install_file(path.join(confroot, confdir, "inputmethod",
+                               "langya.conf"),
+                     path.join(share, "fcitx5", "inputmethod"))
         os.cp(path.join(os.projectdir(), "icons", "."),
               path.join(share, "icons", "hicolor"))
         if os.isfile("data/langya.map") then
-            os.cp("data/langya.map",
-                  path.join(share, "fcitx5", "langya", "langya.map"))
+            install_file("data/langya.map",
+                         path.join(share, "fcitx5", "langya",
+                                   "langya.map"))
         else
             print("提示：缺 data/langya.map，请先运行 xmake export-char-map")
         end
 
         -- libime 数据（sc.dict + zh_CN.lm），XDG Data 路径。
-        -- 缺语言模型时引擎会退化为无词频排序（单字候选生僻字居前，
-        -- task-16），安装侧必须显式报缺而不是静默跳过。
-        local lm = path.join(root, "usr", "lib64", "libime")
+        -- 系统已提供（发行版 libime / libime-data）则不复制；
+        -- 缺语言模型时引擎会退化为无词频排序（task-16），显式报缺
+        local syshasdict = os.isfile("/usr/share/libime/sc.dict")
+            or (sysshare and os.isfile(path.join(sysshare, "..", "libime",
+                                                 "sc.dict")))
         os.mkdir(path.join(share, "libime"))
-        if os.isfile(path.join(root, "usr", "share", "libime", "sc.dict")) then
-            os.cp(path.join(root, "usr", "share", "libime", "sc.dict"),
-                  path.join(share, "libime"))
+        if syshasdict then
+            print("系统已提供 libime 词典数据，跳过复制（不遮蔽）")
+        elseif os.isfile(path.join(root, "usr", "share", "libime",
+                                   "sc.dict")) then
+            install_file(path.join(root, "usr", "share", "libime",
+                                   "sc.dict"),
+                         path.join(share, "libime"))
         else
             print("警告：缺 sc.dict（拼音词典），候选将不可用；"
                 .. "请先运行 tools/setup_fcitx5root.sh")
         end
-        if os.isfile(path.join(lm, "zh_CN.lm")) then
+        local lm = path.join(root, "usr", "lib64", "libime")
+        if os.isfile("/usr/lib64/libime/zh_CN.lm")
+            or os.isfile("/usr/share/libime/zh_CN.lm") then
+            print("系统已提供 zh_CN.lm，跳过复制（不遮蔽）")
+        elseif os.isfile(path.join(lm, "zh_CN.lm")) then
             for _, f in ipairs(os.files(path.join(lm, "zh_CN.lm*"))) do
-                os.cp(f, path.join(share, "libime"))
+                install_file(f, path.join(share, "libime"))
             end
         else
             print("警告：缺 zh_CN.lm（语言模型），单字候选将失去"
@@ -155,35 +210,45 @@ target("langya")
                 .. "tools/setup_fcitx5root.sh")
         end
 
-        -- chttrans 简繁转换模块（OpenCC 后端，港繁配置见下）
-        -- 依赖的系统 libopencc 由发行版提供（Fedora: opencc 包）
-        -- chttrans（简繁转换）+ punctuation（中文标点）：
-        -- 琅琊的依赖模块，一并用户级安装（引擎 activate 拉起）
+        -- chttrans／punctuation 模块：琅琊的依赖，系统已提供则不复制
         for _, mod in ipairs({"chttrans", "punctuation"}) do
             local so = path.join(root, "usr", "lib64", "fcitx5",
                                  "lib" .. mod .. ".so")
-            if os.isfile(so) then
-                os.cp(so, libdir_)
-                local conf = path.join(root, "usr", "share", "fcitx5",
-                                       "addon", mod .. ".conf")
-                if mod == "chttrans" then
-                    -- 两处适配：1) 剥离 notifications 可选依赖（桌面
-                    -- 永不加载，等待会卡死）；2) OnDemand→False 随
-                    -- fcitx5 启动加载（OnDemand 拉起在部分环境死结）
-                    local nl = string.char(10)
-                    local pat = "%[Addon/OptionalDependencies%]"
-                        .. "%s*" .. nl .. "+0=notifications[%s" .. nl .. "]*"
-                    local t = io.readfile(conf):gsub(pat, "")
-                        :gsub("OnDemand=True", "OnDemand=False")
-                    io.writefile(path.join(share, "fcitx5", "addon",
-                                           "chttrans.conf"), t)
-                else
-                    os.cp(conf, path.join(share, "fcitx5", "addon"))
-                end
+            if syslibaddon and os.isfile(path.join(syslibaddon,
+                                                   "lib" .. mod .. ".so")) then
+                print("系统已提供 lib" .. mod .. "，跳过复制（不遮蔽）")
+            elseif os.isfile(so) then
+                install_file(so, libdir_)
             else
                 print("提示：缺 lib" .. mod .. ".so，跳过该模块")
+                goto continue
             end
+            local conf = path.join(root, "usr", "share", "fcitx5",
+                                   "addon", mod .. ".conf")
+            if sysshare and os.isfile(path.join(sysshare, "addon",
+                                                mod .. ".conf")) then
+                print("系统已提供 " .. mod .. " addon 配置，跳过（不遮蔽）")
+                goto continue
+            end
+            if mod == "chttrans" then
+                -- 两处适配：1) 剥离 notifications 可选依赖（桌面
+                -- 永不加载，等待会卡死）；2) OnDemand→False 随
+                -- fcitx5 启动加载（OnDemand 拉起在部分环境死结）
+                local nl = string.char(10)
+                local pat = "%[Addon/OptionalDependencies%]"
+                    .. "%s*" .. nl .. "+0=notifications[%s" .. nl .. "]*"
+                local dst = path.join(share, "fcitx5", "addon",
+                                      "chttrans.conf")
+                local t = io.readfile(conf):gsub(pat, "")
+                    :gsub("OnDemand=True", "OnDemand=False")
+                io.writefile(dst, t)
+                table.insert(manifest, dst)
+            else
+                install_file(conf, path.join(share, "fcitx5", "addon"))
+            end
+            ::continue::
         end
+
         -- 用户级配置：简→繁用香港标准（s2hk），繁→简用 hk2s。
         -- 键必须为顶层（chttrans 配置定义即顶层键，分组写法会被忽略，
         -- B1）；Hotkey 为列表项须经 [Hotkey] 枚举。已有用户配置时
@@ -200,17 +265,33 @@ target("langya")
                          .. "OpenCCS2TProfile=s2hk.json\n"
                          .. "OpenCCT2SProfile=hk2s.json\n"
                          .. "\n[Hotkey]\n0=Control+Shift+F\n")
+            table.insert(manifest, usercht)
         end
 
         -- addon 搜索路径（fcitx5 不默认搜 ~/.local/lib/fcitx5）：
-        -- environment.d 对 systemd 用户会话生效（KDE Wayland 需重新登录）
+        -- environment.d 对 systemd 用户会话生效（KDE Wayland 需重新登录）。
+        -- B2：不写死系统模块目录——用 pkg-config 探测的系统目录作后备，
+        -- 探测不到时给常见路径全集，绝不截断系统既有目录
         local envd = path.join(home, ".config", "environment.d")
         os.mkdir(envd)
-        io.writefile(path.join(envd, "langya-fcitx5.conf"),
-                     "FCITX_ADDON_DIRS=" .. libdir_
-                         .. ":/usr/lib64/fcitx5\n")
+        local sysdirs = {}
+        if syslibaddon then
+            table.insert(sysdirs, syslibaddon)
+        end
+        table.insert(sysdirs, "/usr/lib64/fcitx5")
+        table.insert(sysdirs, "/usr/lib/x86_64-linux-gnu/fcitx5")
+        table.insert(sysdirs, "/usr/lib/fcitx5")
+        local envdfile = path.join(envd, "langya-fcitx5.conf")
+        io.writefile(envdfile,
+                     "FCITX_ADDON_DIRS=" .. libdir_ .. ":"
+                         .. table.concat(sysdirs, ":") .. "\n")
+        table.insert(manifest, envdfile)
+        -- 写安装清单（卸载按清单逐项删除）
+        io.writefile(path.join(share, "fcitx5", "langya",
+                               "installed-files.list"),
+                     table.concat(manifest, "\n") .. "\n")
         local msg = [[✓ 用户级安装完成 → %s
-  立即生效：export FCITX_ADDON_DIRS=%s:/usr/lib64/fcitx5 && fcitx5 -r
+  立即生效：export FCITX_ADDON_DIRS=%s && fcitx5 -r
   重登录后：environment.d 自动生效
   添加输入法：系统设置→键盘→输入法→添加「琅琊小篆」]]
         print(msg:format(inst, libdir_))
@@ -264,37 +345,50 @@ task("uninstall")
     set_category("langya")
     on_run(function ()
         local home = os.getenv("HOME")
-        local files = {
-            path.join(home, ".local/lib/fcitx5/langya.so"),
-            path.join(home, ".local/share/fcitx5/addon/langya.conf"),
-            path.join(home, ".local/share/fcitx5/inputmethod/langya.conf"),
-            path.join(home, ".local/share/fcitx5/langya/langya.map"),
-            path.join(home, ".config/environment.d/langya-fcitx5.conf"),
-        }
-        for _, f in ipairs(files) do
-            if os.isfile(f) then
+        local manifest = path.join(home, ".local/share/fcitx5/langya",
+                                   "installed-files.list")
+        if os.isfile(manifest) then
+            for _, line in ipairs(io.lines(manifest)) do
+                if line ~= "" and os.exists(line) then
+                    os.tryrm(line)
+                    print("已删 %s", line)
+                end
+            end
+            os.tryrm(manifest)
+        else
+            print("未找到安装清单，按旧版固定路径清理")
+            local files = {
+                path.join(home, ".local/lib/fcitx5/langya.so"),
+                path.join(home, ".local/share/fcitx5/addon/langya.conf"),
+                path.join(home, ".local/share/fcitx5/inputmethod/langya.conf"),
+                path.join(home, ".local/share/fcitx5/langya/langya.map"),
+                path.join(home, ".config/environment.d/langya-fcitx5.conf"),
+            }
+            for _, f in ipairs(files) do
+                if os.isfile(f) then
+                    os.tryrm(f)
+                    print("已删 %s", f)
+                end
+            end
+            for _, f in ipairs(os.files(path.join(home, ".local/lib/fcitx5",
+                                                  "libIME*.so*"))) do
                 os.tryrm(f)
                 print("已删 %s", f)
             end
-        end
-        -- libIME* 与 libime 数据为本安装器放入，一并清理
-        for _, f in ipairs(os.files(path.join(home, ".local/lib/fcitx5",
-                                              "libIME*.so*"))) do
-            os.tryrm(f)
-            print("已删 %s", f)
-        end
-        for _, f in ipairs({"sc.dict", "zh_CN.lm", "zh_CN.lm.predict"}) do
-            local p2 = path.join(home, ".local/share/libime", f)
-            if os.isfile(p2) then
-                os.tryrm(p2)
-                print("已删 %s", p2)
+            for _, f in ipairs({"sc.dict", "zh_CN.lm", "zh_CN.lm.predict"}) do
+                local p2 = path.join(home, ".local/share/libime", f)
+                if os.isfile(p2) then
+                    os.tryrm(p2)
+                    print("已删 %s", p2)
+                end
             end
         end
-        print("完成。输入法列表里的「琅琊小篆」请在系统设置中手动移除")
+        print("完成。输入法列表里的「琅琊小篆」请在系统设置中手动移除；"
+            .. "系统自身模块与配置未受本次安装影响")
     end)
     set_menu {
         usage = "xmake uninstall",
-        description = "卸载用户级琅琊安装（~/.local 布局）",
+        description = "卸载用户级琅琊安装（~/.local 布局，按清单清理）",
     }
 
 includes("tests/xmake.lua")
