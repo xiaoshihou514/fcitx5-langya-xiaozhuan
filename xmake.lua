@@ -228,22 +228,7 @@ task("download-dict")
         description = "下载 Rime 词典与词频数据到 tools/cache/",
     }
 
--- 生成 data/langya.tsv（封裝 tools/export_data.py，需 uv 与 ../zhuan）
-task("export-data")
-    set_category("langya")
-    on_run(function ()
-        if not os.isdir("../zhuan") then
-            raise("未找到 ../zhuan（zhuan 项目应与 langya 同级，"
-                .. "提供 seal.db 查表链环境）")
-        end
-        os.execv("uv", {"run", "--project", "../zhuan",
-                        "python", "tools/export_data.py"})
-    end)
-    set_menu {
-        usage = "xmake export-data",
-        description = "生成词典 data/langya.tsv（先跑 download-dict）",
-    }
-
+-- 导出 data/langya.map（封裝 tools/export_char_map.py，需 uv 与 ../zhuan）
 task("export-char-map")
     set_category("langya")
     on_run(function ()
