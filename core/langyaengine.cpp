@@ -109,19 +109,20 @@ void LangyaModeAction::activate(fcitx::InputContext *ic) {
 
 class LangyaCandidateWord : public fcitx::CandidateWord {
 public:
-    LangyaCandidateWord(LangyaEngine *engine, std::string hanzi)
+    LangyaCandidateWord(LangyaEngine *engine, std::string hanzi, int index)
         : CandidateWord(fcitx::Text(hanzi)), engine_(engine),
-          hanzi_(std::move(hanzi)) {}
+          hanzi_(std::move(hanzi)), index_(index) {}
 
     void select(fcitx::InputContext *ic) const override {
-        auto converted = engine_->charmap().convert(
-            hanzi_, engine_->state(ic)->sealMode);
-        engine_->commitEntry(ic, hanzi_, converted.second);
+        // K3：走 libime 的 select 机制——整句选择则上屏，部分选择
+        // （如 nihaoma 选「你好」）保留剩余拼音继续组字
+        engine_->selectCandidate(ic, index_);
     }
 
 private:
     LangyaEngine *engine_;
     std::string hanzi_;
+    int index_;
 };
 
 /* 标点候选（多映射键的候选窗词条：选中上屏该标点并退出模式） */
@@ -513,8 +514,9 @@ void LangyaEngine::updateUI(fcitx::InputContext *ic) {
         fcitx::Key(FcitxKey_5), fcitx::Key(FcitxKey_6),
         fcitx::Key(FcitxKey_7), fcitx::Key(FcitxKey_8),
         fcitx::Key(FcitxKey_9), fcitx::Key(FcitxKey_0)});
+    int idx = 0;
     for (const auto &cand : ctx.candidatesToCursor()) {
-        candList->append<LangyaCandidateWord>(this, cand.toString());
+        candList->append<LangyaCandidateWord>(this, cand.toString(), idx++);
     }
     if (candList->size() > 0) {
         candList->setGlobalCursorIndex(0);
@@ -529,17 +531,29 @@ void LangyaEngine::updateUI(fcitx::InputContext *ic) {
 
 /* ── 提交 ───────────────────────────────────────────────── */
 
-void LangyaEngine::commitEntry(fcitx::InputContext *ic,
-                               const std::string &hanzi, bool miss) {
+void LangyaEngine::selectCandidate(fcitx::InputContext *ic, int index) {
     auto *st = state(ic);
-    auto [out, m] = charmap().convert(hanzi, st->sealMode);
+    auto &ctx = st->context;
+    if (index < 0 ||
+        index >= static_cast<int>(ctx.candidatesToCursor().size())) {
+        return;
+    }
+    ctx.select(index);
+    if (!ctx.selected()) {
+        // 部分选择：剩余拼音继续组字（K3，如 nihaoma 选「你好」后
+        // 继续选「吗」），刷新面板展示剩余候选
+        updateUI(ic);
+        return;
+    }
+    auto sentence = ctx.selectedSentence();
+    auto [out, m] = charmap().convert(sentence, st->sealMode);
     ic->commitString(out);
-    st->context.clear();
+    ctx.clear();
     ic->inputPanel().reset();
     ic->updatePreedit();
     ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
-    FCITX_DEBUG() << "琅琊上屏 " << hanzi << " → " << out
-                 << (m || miss ? "（含未收字）" : "");
+    FCITX_DEBUG() << "琅琊上屏 " << sentence << " → " << out
+                 << (m ? "（含未收字）" : "");
 }
 
 /* ── 配置 ───────────────────────────────────────────────── */

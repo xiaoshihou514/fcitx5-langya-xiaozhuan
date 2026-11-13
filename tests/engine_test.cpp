@@ -264,6 +264,22 @@ int main() {
         check(key("space"), "空格被吞");
         check(commitIs("吗"), "ma 首选为「吗」（說文未收，回退原字）");
 
+        // ═══ 场景组 3b：部分选择后继续组字（K3 回归）═══
+        newIC("t3b-部分选择");
+        toggleMode();  // 楷化模式，断言确定性文本
+        check(type("nihaoma"), "nihaoma 组字被吞");
+        check(key("Right"), "Right 移高亮被吞");
+        check(key("space"), "空格选「你好」被吞");
+        {
+            size_t n = g_commits.size();
+            check(n == 0 || commitIs("") == false,
+                  "部分选择不产生独立上屏");
+        }
+        check(candCount(ic) > 0, "剩余拼音「ma」继续组字出候选");
+        check(key("space"), "空格选剩余候选被吞");
+        check(commitIs("你好吗"), "整句一起上屏「你好吗」（K3）");
+        toggleMode();  // 切回小篆
+
         // ═══ 场景组 4：非组字标点（punctuation 模块 zh_CN 表）═══
         newIC("t4-标点");
         // K2 回归：组字中按逗号＝选候选并继续输出标点（wo, → 𿕾，）

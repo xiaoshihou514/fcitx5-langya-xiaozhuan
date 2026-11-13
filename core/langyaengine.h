@@ -100,9 +100,9 @@ public:
     void setConfig(const fcitx::RawConfig &config) override;
     void reloadConfig() override;
 
-    /* 候选词回调：按当前上下文模式提交并复位 */
-    void commitEntry(fcitx::InputContext *ic, const std::string &hanzi,
-                     bool miss);
+    /* 候选词回调：经 libime select 选择候选；整句选择上屏，
+     * 部分选择保留剩余拼音继续组字（K3） */
+    void selectCandidate(fcitx::InputContext *ic, int index);
     void toggleMode(fcitx::InputContext *ic);
     LangyaConfig &config() { return config_; }
     LangyaState *state(fcitx::InputContext *ic);
