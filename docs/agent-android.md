@@ -34,8 +34,9 @@ apiVersion 0.1 需与宿主匹配）一起安装。
 
 - Android SDK Platform & Build-Tools 35
 - Android NDK（side-by-side）25＋、CMake 3.22.1（构建时按宿主要求自动安装）
-- KDE extra-cmake-modules（ECM）：系统包安装，或设
-  `ECM_DIR=<ECM 的 cmake 目录>`（宿主的 fcitx5 原生库配置需要）
+- KDE extra-cmake-modules（ECM）：宿主的 fcitx5 原生库配置需要。无需
+  手工安装：构建脚本按 系统包 → android/build/ecm-root 本地前缀 →
+  自动下载（5.116.0）逐级探测与安装
 - JDK 17＋（注意：GraalVM 的 jlink 无法处理 android 平台包，
   需用标准 JDK，如 Temurin 21）、git
 - 构建词典需要：`../../zhuan`（seal.db 查表链，uv 环境）
@@ -58,7 +59,9 @@ xmake sync-android && xmake build-android
 # 环境变量（均有默认）：
 #   LANGYA_ABI=arm64-v8a|armeabi-v7a|x86_64|x86   目标 ABI
 #   LANGYA_REF=<分支/标签/SHA>   覆盖宿主版本（默认 PINNED_REF）
-#   LANGYA_GRADLE_HOME=<目录>    gradle 依赖缓存（默认 /tmp/gradle-home）
+#   LANGYA_GRADLE_HOME=<目录>    gradle 依赖缓存（默认 android/build/
+#                                gradle-home，持久；构建时自动导出
+#                                GRADLE_USER_HOME，绕开只读的 ~/.gradle）
 ```
 
 产物：APK 路径由 `xmake build-android` 直接打印。
@@ -66,7 +69,7 @@ xmake sync-android && xmake build-android
 已在本机验证（2026-10）：官方 0.1.3 对应树构建成功（单 ABI 约
 3 分钟、增量 18 秒），APK 内含
 `lib/<abi>/langya.so`、`assets/usr/share/fcitx5/{addon,inputmethod}/langya.conf`
-与词典 `assets/usr/share/fcitx5/langya/langya.tsv`。
+与词典 `assets/usr/share/fcitx5/langya/langya.map`。
 
 ## 安装与启用
 
@@ -84,6 +87,11 @@ xmake sync-android && xmake build-android
 ```
 langya/android/
 ├── xmake.lua                    # setup/sync/build-android 任务（PINNED_REF 锁版本）
+│                                # 环境探测已固化：Android SDK（ANDROID_HOME 或
+│                                # 常见安装位置）、ECM（系统包 → android/build/
+│                                # ecm-root 本地前缀 → 自动下载 5.116.0 安装）、
+│                                # gradle 缓存（默认 android/build/gradle-home，
+│                                # 自动导出 GRADLE_USER_HOME）
 ├── plugin/                      # 插件模块（同步进宿主树 plugin/langya）
 │   ├── build.gradle.kts         # 约定插件 + native-app + fcitx-component
 │   ├── licenses/libraries/      # 第三方组件许可清单
@@ -91,7 +99,7 @@ langya/android/
 │       ├── AndroidManifest.xml
 │       ├── cpp/CMakeLists.txt   # prefab fcitx5 → add_subdirectory(core)
 │       └── res/                 # plugin.xml（apiVersion 0.1）＋图标
-└── README.md
+└── README.md                    # 一句话定位，详见 docs/agent-android.md
 ```
 
 ## 与 Linux 版的差异

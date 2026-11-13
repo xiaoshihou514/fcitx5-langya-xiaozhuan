@@ -152,16 +152,68 @@ task("build-android")
                 .. "平台包；若构建失败请 JAVA_HOME 指向标准 JDK 21")
         end
 
+        -- Android SDK：环境变量 → 常见安装位置探测（宿主 gradle 需要）
+        local sdk = os.getenv("ANDROID_HOME")
+        if not sdk or sdk == "" then
+            local home = os.getenv("HOME") or ""
+            for _, cand in ipairs({
+                    path.join(home, "Applications", "android-studio-sdk"),
+                    path.join(home, "Android", "Sdk"),
+                    "/opt/android-sdk", "/usr/lib/android-sdk"}) do
+                if os.isdir(path.join(cand, "platforms")) then
+                    sdk = cand
+                    break
+                end
+            end
+        end
+        if not sdk or sdk == "" then
+            raise("未找到 Android SDK：请设 ANDROID_HOME，或安装在 "
+                .. "~/Applications/android-studio-sdk、~/Android/Sdk 等常见位置")
+        end
+        print("Android SDK：%s", sdk)
+
         -- ECM（KDE extra-cmake-modules，宿主 fcitx5 配置需要）：
-        -- 环境变量 → 系统安装 → 本地 RPM 解包前缀，逐级探测
+        -- 环境变量 → 系统安装 → 本地前缀 android/build/ecm-root（持久，
+        -- 不受 /tmp 清空影响）→ 均无则自动下载安装（extra-cmake-modules
+        -- 5.116.0，源 https://download.kde.org/stable/frameworks/5.116/）
         local ecm = os.getenv("ECM_DIR")
         if not ecm or ecm == "" then
+            local ecmroot = path.join(os.projectdir(), "android", "build",
+                                      "ecm-root")
             for _, cand in ipairs({"/usr/share/ECM/cmake",
-                                    "/tmp/fcitx5root/usr/share/ECM/cmake"}) do
+                                   path.join(ecmroot, "share", "ECM", "cmake"),
+                                   path.join(ecmroot, "usr", "share", "ECM",
+                                             "cmake")}) do
                 if os.isfile(path.join(cand, "ECMConfig.cmake")) then
                     ecm = cand
                     break
                 end
+            end
+            if not ecm then
+                print("未找到系统 ECM，自动安装 extra-cmake-modules "
+                    .. "5.116.0 → %s", ecmroot)
+                local srcdir = path.join(os.projectdir(), "android", "build",
+                                         "src", "ecm")
+                os.mkdir(srcdir)
+                local tgz = path.join(srcdir,
+                    "extra-cmake-modules-5.116.0.tar.xz")
+                if not os.isfile(tgz) then
+                    os.execv("bash", {"-c",
+                        "curl -fsSLo '" .. tgz
+                        .. "' https://download.kde.org/stable/frameworks/"
+                        .. "5.116/extra-cmake-modules-5.116.0.tar.xz"})
+                end
+                os.execv("bash", {"-c",
+                    "cd '" .. srcdir .. "' && tar xf "
+                    .. "extra-cmake-modules-5.116.0.tar.xz"})
+                local verdir = path.join(srcdir,
+                                         "extra-cmake-modules-5.116.0")
+                os.execv("cmake", {"-S", verdir,
+                                   "-B", path.join(verdir, "build"),
+                                   "-DCMAKE_INSTALL_PREFIX=" .. ecmroot,
+                                   "-DBUILD_TESTING=OFF"})
+                os.execv("cmake", {"--install", path.join(verdir, "build")})
+                ecm = path.join(ecmroot, "share", "ECM", "cmake")
             end
         end
         if not ecm or ecm == "" then
@@ -170,8 +222,16 @@ task("build-android")
         end
         print("ECM：%s", ecm)
 
+        -- gradle 缓存：默认放 android/build/gradle-home（持久）。默认的
+        -- /tmp/gradle-home 会被 /tmp 清空策略抹掉；~/.gradle 在部分机器
+        -- 只读。gradlew 发行包缓存也经 GRADLE_USER_HOME 一并改道。
+        local ghome = os.getenv("LANGYA_GRADLE_HOME") or path.join(
+            os.projectdir(), "android", "build", "gradle-home")
+
         local envs = {
             ECM_DIR = ecm,
+            ANDROID_HOME = sdk,
+            GRADLE_USER_HOME = ghome,
             CMAKE_BUILD_PARALLEL_LEVEL = "4",
         }
         -- release 需签名：默认复用 SDK 调试密钥（插件加载不校验签名，
