@@ -70,6 +70,7 @@ target("langya")
                              "punctuation"),
                    path.join(inc, "LibIME"),
                    path.join(inc, "Fcitx5", "Core"),
+                   path.join(inc, "Fcitx5", "Config"),
                    path.join(inc, "Fcitx5", "Utils"))
         target:add("linkdirs", path.join(root, "usr", "lib64"))
         target:add("links", "IMECore", "IMEPinyin")
@@ -108,7 +109,7 @@ target("langya")
         local out = os.iorunv("pkg-config",
                               {"--variable=prefix", "Fcitx5Core"})
         if out then
-            sysprefix = out:strip()
+            sysprefix = (out:gsub("[\r\n]", ""))
         end
         if not sysprefix or sysprefix == "" then
             for _, cand in ipairs({"/usr", "/usr/local"}) do
@@ -124,9 +125,13 @@ target("langya")
         local syslibaddon = nil   -- 系统模块目录（lib*/fcitx5）
         local sysshare = nil      -- 系统数据目录（share/fcitx5）
         if sysprefix and sysprefix ~= "" then
-            syslibaddon = (os.isfile(path.join(sysprefix, "lib64", "fcitx5"))
+            -- 目录判断用「目录内探针文件」（xmake os.isdir 语义不可靠，
+            -- 复验⑤：os.isfile 判目录恒 false 导致模块仍被复制遮蔽）
+            syslibaddon = (os.isfile(path.join(sysprefix, "lib64", "fcitx5",
+                                               "libclassicui.so"))
                 and path.join(sysprefix, "lib64", "fcitx5"))
-                or (os.isfile(path.join(sysprefix, "lib", "fcitx5"))
+                or (os.isfile(path.join(sysprefix, "lib", "fcitx5",
+                                        "libclassicui.so"))
                 and path.join(sysprefix, "lib", "fcitx5"))
             sysshare = path.join(sysprefix, "share", "fcitx5")
         end
