@@ -195,6 +195,15 @@ LangyaEngine::LangyaEngine(fcitx::Instance *instance)
     } else {
         FCITX_ERROR() << "琅琊：未找到 libime/sc.dict，候选将不可用";
     }
+    // 语言模型缺失时 libime 静默降级为无频率排序：单字候选全是生僻字
+    // （如 yi→荑嗌㡫，task-16 缺陷）。在此显式检测并给出可行动的报错。
+    if (fcitx::StandardPaths::global()
+            .locate(fcitx::StandardPathsType::Data, "libime/zh_CN.lm")
+            .empty()) {
+        FCITX_ERROR() << "琅琊：未找到 libime/zh_CN.lm 语言模型，"
+                         "单字候选将失去词频排序（表现为生僻字居前）。"
+                         "请重装或运行 xmake install 补齐 libime 数据";
+    }
     if (charmap_.load()) {
         FCITX_INFO() << "琅琊：映射表加载成功";
     } else {

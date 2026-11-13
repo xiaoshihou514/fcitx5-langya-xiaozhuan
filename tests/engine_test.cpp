@@ -239,6 +239,19 @@ int main() {
         key("w"); key("o"); key("h"); key("BackSpace"); key("space");
         check(true, "woh+退格+空格 上屏小篆「我」");
 
+        // 12) 单字排序回归（task-16）：常用单字须进候选前列。
+        //     语言模型（zh_CN.lm）缺失时 libime 静默降级为无词频排序，
+        //     yi 会给出「荑嗌㡫」等生僻字——本组用例守护词频排序不回退。
+        tf->call<ITestFrontend::pushCommitExpectation>(cp(0x3D000)); // 一
+        key("y"); key("i"); key("space");
+        check(true, "yi 首选为「一」(U+3D000)");
+        tf->call<ITestFrontend::pushCommitExpectation>(cp(0x3E300)); // 的
+        key("d"); key("e"); key("space");
+        check(true, "de 首选为「的」(U+3E300)");
+        tf->call<ITestFrontend::pushCommitExpectation>("吗"); // 說文未收回退
+        key("m"); key("a"); key("space");
+        check(true, "ma 首选为「吗」（說文未收，回退原字）");
+
         tf->call<ITestFrontend::destroyInputContext>(uuid);
         instance.exit(g_fail == 0 ? 0 : 1);
     });

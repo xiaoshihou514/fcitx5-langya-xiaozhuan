@@ -133,13 +133,26 @@ target("langya")
             print("提示：缺 data/langya.map，请先运行 xmake export-char-map")
         end
 
-        -- libime 数据（sc.dict + zh_CN.lm），XDG Data 路径
+        -- libime 数据（sc.dict + zh_CN.lm），XDG Data 路径。
+        -- 缺语言模型时引擎会退化为无词频排序（单字候选生僻字居前，
+        -- task-16），安装侧必须显式报缺而不是静默跳过。
         local lm = path.join(root, "usr", "lib64", "libime")
         os.mkdir(path.join(share, "libime"))
-        os.cp(path.join(root, "usr", "share", "libime", "sc.dict"),
-              path.join(share, "libime"))
-        for _, f in ipairs(os.files(path.join(lm, "zh_CN.lm*"))) do
-            os.cp(f, path.join(share, "libime"))
+        if os.isfile(path.join(root, "usr", "share", "libime", "sc.dict")) then
+            os.cp(path.join(root, "usr", "share", "libime", "sc.dict"),
+                  path.join(share, "libime"))
+        else
+            print("警告：缺 sc.dict（拼音词典），候选将不可用；"
+                .. "请先运行 tools/setup_fcitx5root.sh")
+        end
+        if os.isfile(path.join(lm, "zh_CN.lm")) then
+            for _, f in ipairs(os.files(path.join(lm, "zh_CN.lm*"))) do
+                os.cp(f, path.join(share, "libime"))
+            end
+        else
+            print("警告：缺 zh_CN.lm（语言模型），单字候选将失去"
+                .. "词频排序（生僻字居前）；请先运行 "
+                .. "tools/setup_fcitx5root.sh")
         end
 
         -- chttrans 简繁转换模块（OpenCC 后端，港繁配置见下）
