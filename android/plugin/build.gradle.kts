@@ -55,5 +55,7 @@ dependencies {
     implementation(project(":lib:fcitx5"))
     // libime prefab（拼音内核，词典/语言模型用宿主数据）
     implementation(project(":lib:libime"))
+    // punctuation 模块（中文标点，zh_CN 表与拼音共用）
+    implementation(project(":lib:fcitx5-chinese-addons"))
     implementation(project(":lib:plugin-base"))
 }

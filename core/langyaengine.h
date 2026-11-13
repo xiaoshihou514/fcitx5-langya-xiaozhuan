@@ -16,6 +16,7 @@
 #include <fcitx-utils/key.h>
 #include <fcitx/action.h>
 #include <fcitx/addonfactory.h>
+#include <fcitx/addoninstance.h>
 #include <fcitx/event.h>
 #include <fcitx/inputcontextproperty.h>
 #include <fcitx/inputmethodengine.h>
@@ -25,12 +26,10 @@
 #include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
-namespace fcitx {
-class Instance;
-class AddonManager;
-class AddonInstance;
-}
+#include <fcitx/addonmanager.h>
+#include <fcitx/instance.h>
 
 namespace langya {
 
@@ -63,6 +62,9 @@ struct LangyaState : public fcitx::InputContextProperty {
     LangyaState(LangyaEngine *engine);
     libime::PinyinContext context;
     bool sealMode = true;
+    // 标点候选模式（多映射键如 [：候选【「『，选中后上屏）
+    bool puncMode = false;
+    std::vector<std::string> puncCandidates;
 };
 
 /* 键盘内「篆/楷」切换按钮（StatusArea action） */
@@ -107,6 +109,10 @@ public:
 
     libime::PinyinIME &ime() { return ime_; }
     const CharMap &charmap() const { return charmap_; }
+
+    // 中文标点（punctuation 模块服务，zh_CN 与 fcitx5 拼音共用）
+    FCITX_ADDON_DEPENDENCY_LOADER(punctuation, instance_->addonManager());
+    bool handlePunc(fcitx::KeyEvent &event);
 
 private:
     void updateUI(fcitx::InputContext *ic);

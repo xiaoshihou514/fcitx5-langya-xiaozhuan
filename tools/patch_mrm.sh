@@ -1,26 +1,52 @@
 #!/usr/bin/env bash
-# 主题 .mrm 元数据 DRM 免检补丁（HyperOS 3 逆向成果）。
+# 主题 .mrm DRM 免检补丁 v2 —— 自动发现活动条目 + 状态诊断。
 #
-# 原理（反编译 com.android.thememanager ThemeHelper.g → DrmService.q）：
-#   DRM 校验在 contentPath 以 /system 开头时直接放行：
-#     if (new File(contentPath).getAbsolutePath().startsWith("/system"))
-#         return DRM_SUCCESS;
-#   File.getAbsolutePath() 不解析 ".."，而实际文件 IO 由内核解析——
-#   注入 "/system/../sdcard/..." 路径遍历：DRM 以为内容在 /system，
-#   应用层实际读取我们的 .mrc 字体。
+# 用法：
+#   bash tools/patch_mrm.sh          # 自动找最新 .mrm 打补丁
+#   bash tools/patch_mrm.sh status   # 诊断字体链路状态（不改动）
 #
-# 用法：bash tools/patch_mrm.sh [localId]   # 默认最新的 ec98f9a5…
-# 前置：字体 mtz 已导入（.mrc/.mrm 已生成），手机已连 adb。
-# 恢复：adb shell "cp /sdcard/Download/ec98.mrm.bak <mrm路径>"
+# 背景：每次「应用」动作会重建条目（新 uuid、干净 .mrm），补丁失效
+# （真机反复掉补丁的根因）。v2 自动定位当前条目；配合 apply 提示。
 set -euo pipefail
 BASE='/sdcard/Android/data/com.android.thememanager/files/MIUI/theme/.data'
-ID="${1:-ec98f9a5-947b-42fb-af4e-86ad3d77a949}"
-M="$BASE/meta/fonts/$ID.mrm"
 
-adb shell "test -f '$M' && cp '$M' '/sdcard/Download/$ID.mrm.bak'"
-# 只替换顶层 contentPath（第一处 null）
-adb shell "toybox sed -i '0,/\"contentPath\": null/s|\"contentPath\": null|\"contentPath\": \"/system/../$BASE/content/fonts/$ID.mrc\"|' '$M'"
-echo "已补丁：$M"
-adb shell "grep -m1 -o '\"contentPath\": \"[^\"]*\"' '$M'"
-echo "备份：/sdcard/Download/$ID.mrm.bak"
-echo "下一步：主题壁纸 → 我的字体 → 说文小篆 → 应用；观察 logcat 'check rights isLegal'"
+# 找最新 .mrm（排除预置 b004d74e）
+find_active() {
+    adb shell "ls -t '$BASE/meta/fonts/'" | tr -d '\r' \
+        | grep -v '^b004d74e' | head -1 | sed 's/\.mrm$//'
+}
+
+status() {
+    local id
+    id=$(find_active)
+    echo "── 活动条目：$id"
+    adb shell "grep -m1 -o '\"contentPath\": \"[^\"]*\"' \
+        '$BASE/meta/fonts/$id.mrm'" 2>/dev/null \
+        || echo "contentPath: null（未打补丁）"
+    echo "── 字体落位："
+    adb shell "ls -la /data/system/theme/fonts/Roboto-Regular.ttf \
+        /data/system/fonts/theme_webview/Roboto-Regular.ttf 2>&1" | head -4
+    echo "── 是否需要应用：看上面两行是否齐全＋symlink 指向"
+}
+
+patch() {
+    local id m c
+    id=$(find_active)
+    m="$BASE/meta/fonts/$id.mrm"
+    c="$BASE/content/fonts/$id.mrc"
+    echo "补丁对象：$id"
+    adb shell "test -f '$c'" || { echo "✗ 对应 .mrc 不存在"; exit 1; }
+    adb shell "cp '$m' '/sdcard/Download/$id.mrm.bak'" 2>/dev/null || true
+    # 若已有 contentPath（重建前的补丁残留），先还原 null 再打（幂等）
+    adb shell "toybox sed -i 's|\"contentPath\": \"[^\"]*\"|\"contentPath\": null|' '$m'"
+    adb shell "toybox sed -i 's|\"contentPath\": null|\"contentPath\": \"/system/../$c\"|' '$m'"
+    adb shell "grep -m1 -o '\"contentPath\": \"[^\"]*\"' '$m'"
+    adb shell am force-stop com.android.thememanager
+    echo "✓ 已补丁并强杀主题 app"
+    echo "→ 手机上重新打开主题壁纸，对「说文小篆」点「应用」"
+}
+
+case "${1:-patch}" in
+    status) status ;;
+    patch)  patch ;;
+esac

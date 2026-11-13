@@ -15,6 +15,16 @@ target_link_libraries(langya PRIVATE Fcitx5::Core)
 # libime 拼音内核：Android 走宿主 prefab（jyutping 同款），
 # Linux 走系统安装（Fedora: libime-devel；需与 Fcitx5Core 同前缀）
 if(ANDROID)
+    # punctuation 模块（fcitx5-chinese-addons，jyutping 同款）
+    find_package(fcitx5-chinese-addons REQUIRED CONFIG)
+    get_target_property(FCITX5_CHINESE_ADDONS_CMAKE_MODULES
+                        fcitx5-chinese-addons::cmake
+                        INTERFACE_INCLUDE_DIRECTORIES)
+    set(CMAKE_MODULE_PATH
+        ${FCITX5_CHINESE_ADDONS_CMAKE_MODULES} ${CMAKE_MODULE_PATH})
+    find_package(Fcitx5ModulePunctuation MODULE)
+    target_link_libraries(langya PRIVATE Fcitx5::Module::Punctuation)
+
     find_package(libime REQUIRED CONFIG)
     get_target_property(LIBIME_CMAKE_MODULES libime::cmake
                         INTERFACE_INCLUDE_DIRECTORIES)
@@ -25,7 +35,10 @@ if(ANDROID)
     find_package(Boost 1.87.0 REQUIRED COMPONENTS iostreams CONFIG)
     target_link_libraries(langya PRIVATE Boost::boost Boost::iostreams)
     find_package(LibIMEPinyin MODULE)
-    target_link_libraries(langya PRIVATE LibIME::Pinyin)
+    # punctuation 模块头（zh_CN 标点表与配对引号）
+    find_package(Fcitx5ModulePunctuation MODULE)
+    target_link_libraries(langya PRIVATE LibIME::Pinyin
+        Fcitx5::Module::Punctuation)
 else()
     find_package(LibIMEPinyin REQUIRED)
     target_link_libraries(langya PRIVATE LibIME::Pinyin)
@@ -65,4 +78,9 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/langya-addon.conf"
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/langya-im.conf"
         DESTINATION "${FCITX_INSTALL_PKGDATADIR}/inputmethod"
         RENAME langya.conf
+        COMPONENT config)
+# 简繁转换配置（宿主 chttrans 模块读取的 OpenCC profile）：
+# 简体→港繁用 s2hk，反向用 hk2s；conf/ 为模块配置目录
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/chttrans.conf"
+        DESTINATION "${FCITX_INSTALL_PKGDATADIR}/conf"
         COMPONENT config)

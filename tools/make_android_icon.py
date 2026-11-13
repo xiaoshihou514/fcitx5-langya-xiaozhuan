@@ -272,7 +272,7 @@ def collect(el, matrix, fill, items):
         matrix = mul(matrix, parse_transform(el.get("transform")))
     fill = style_fill(el, fill)
     if tag == "path" and el.get("d"):
-        items.append((el.get("d"), fill, matrix))
+        items.append((el.get("d"), fill, matrix, el.get("id", "")))
     for child in el:
         collect(child, matrix, fill, items)
 
@@ -296,13 +296,13 @@ def main():
     # 篆字的附加变换在 collect 中经 transform 处理（g867 内的 path）
 
     paths = []
-    for d, fill, m in items:
+    for d, fill, m, _id in items:
         td = transform_path(d, mul(C, m))
-        paths.append((td, fill))
+        paths.append((td, fill, _id))
 
     # 输出 vector drawable
     body = []
-    for td, fill in paths:
+    for td, fill, _ in paths:
         body.append(f'    <path\n'
                     f'        android:fillColor="{fill}"\n'
                     f'        android:pathData="{td}" />')
@@ -327,7 +327,7 @@ def main():
     def svg_doc(bg):
         rects = (f'<rect width="108" height="108" fill="{bg}"/>'
                  if bg else "")
-        body2 = "".join(f'<path fill="{f}" d="{d}"/>' for d, f in paths)
+        body2 = "".join(f'<path fill="{f}" d="{d}"/>' for d, f, _ in paths)
         return (f'<svg xmlns="http://www.w3.org/2000/svg" '
                 f'viewBox="0 0 108 108" width="432" height="432">'
                 f"{rects}{body2}</svg>")

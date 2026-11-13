@@ -86,10 +86,12 @@ int main() {
         {root / "usr/share", root / "usr/share/fcitx5",
          root / "usr/share/fcitx5/testing"});
 
+    char argv0[] = "langya-engine-test";
     char arg0[] = "langya-engine-test";
     char arg1[] = "--disable=all";
-    char arg2[] = "--enable=langya,testfrontend,punctuation";
-    char *argv[] = {arg0, arg1, arg2};
+    char arg2[] = "--enable=langya,testfrontend,punctuation,chttrans";
+    char arg3[] = "--verbose=*=5";
+    char *argv[] = {arg0, arg1, arg2, arg3};
     Instance instance(FCITX_ARRAY_SIZE(argv), argv);
     instance.addonManager().registerDefaultLoader(nullptr);
 
@@ -104,6 +106,21 @@ int main() {
 
         auto *tf = instance.addonManager().addon("testfrontend");
         check(tf != nullptr, "testfrontend 加载");
+        // chttrans 简繁模块（OnDemand：引擎 activate 时显式拉起）
+        {
+            auto *info = instance.addonManager().addonInfo("chttrans");
+            check(info && info->isValid(), "chttrans conf 已扫描且有效");
+            if (info) {
+                FCITX_INFO() << "chttrans valid=" << info->isValid()
+                             << " enabled=" << info->isEnabled()
+                             << " onDemand=" << info->onDemand();
+            }
+            auto *cht = instance.addonManager().addon("chttrans");
+            if (!cht) {
+                cht = instance.addonManager().addon("chttrans");
+            }
+            check(cht != nullptr, "chttrans 简繁模块可拉起");
+        }
         auto *langya = instance.addonManager().addon("langya");
         check(langya != nullptr, "langya 引擎加载");
         if (!tf || !langya) {
@@ -200,6 +217,22 @@ int main() {
         key("Right");
         key("space");
         check(true, "zhongguo+Right+空格 上屏高亮候选");
+
+        // 10) 标点（拼音同款）：组字中按逗号＝选高亮候选并吞键
+        tf->call<ITestFrontend::pushCommitExpectation>(cp(0x3F57E));
+        key("w"); key("o"); key("comma");
+        check(true, "wo+逗号 只上屏「𿕾」（逗号吞掉，拼音行为）");
+
+        // 11) 非组字标点（punctuation 模块 zh_CN 表）
+        tf->call<ITestFrontend::pushCommitExpectation>("，");
+        key("comma");
+        check(true, "非组字逗号 → 「，」");
+        tf->call<ITestFrontend::pushCommitExpectation>("。");
+        key("period");
+        check(true, "非组字句号 → 「。」");
+        tf->call<ITestFrontend::pushCommitExpectation>("、");
+        key("backslash");
+        check(true, "非组字反斜杠 → 「、」（顿号）");
 
         // 6) 退格改键：woh + 退格 + 空格 → 我 U+3F57E
         tf->call<ITestFrontend::pushCommitExpectation>(cp(0x3F57E));

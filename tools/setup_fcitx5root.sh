@@ -12,8 +12,8 @@ need() { rpm -q --whatprovides "$1" >/dev/null 2>&1 || rpm -q "$1" >/dev/null 2>
 
 echo "── 下载 RPM（若缓存缺失）──"
 cd "$RPM"
-for spec in fcitx5-libs fcitx5-devel fcitx5 fcitx5-data \
-            extra-cmake-modules libime libime-devel boost-devel; do
+for spec in fcitx5-libs fcitx5-devel fcitx5 fcitx5-data fcitx5-chinese-addons \
+            extra-cmake-modules libime libime-devel boost-devel opencc; do
     # 仅当解包目标缺关键文件时下载
     if ! ls "$ROOT/usr/lib64/libFcitx5Core.so" >/dev/null 2>&1 \
        || ! ls "$ROOT/usr/lib64/libIMECore.so" >/dev/null 2>&1 \
@@ -62,6 +62,12 @@ if [ ! -s "$ROOT/usr/share/libime/sc.dict" ]; then
         echo "  ⚠ 手机未连接，跳过 sc.dict（engine-test 需它）"
     fi
 fi
+
+# chttrans 的可选依赖 notifications 在桌面永不加载（OnDemand 死等），
+# 安装侧剥离该依赖行（上游行为：模块仅用于发通知，非必需）
+sed -i '/\[Addon\/OptionalDependencies\]/,/notifications/d; \
+        s/^OnDemand=True$/OnDemand=False/' \
+    "$ROOT/usr/share/fcitx5/addon/chttrans.conf" 2>/dev/null || true
 
 echo "── 验证 ──"
 export PKG_CONFIG_PATH="$ROOT/usr/lib64/pkgconfig"

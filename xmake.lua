@@ -65,6 +65,9 @@ target("langya")
         local root = os.getenv("FCITX_ROOT") or "/tmp/fcitx5root"
         local inc = path.join(root, "usr", "include")
         target:add("includedirs", inc, path.join(inc, "boost"),
+                   path.join(inc, "Fcitx5", "Module"),
+                   path.join(inc, "Fcitx5", "Module", "fcitx-module",
+                             "punctuation"),
                    path.join(inc, "LibIME"),
                    path.join(inc, "Fcitx5", "Core"),
                    path.join(inc, "Fcitx5", "Utils"))
@@ -138,6 +141,47 @@ target("langya")
         for _, f in ipairs(os.files(path.join(lm, "zh_CN.lm*"))) do
             os.cp(f, path.join(share, "libime"))
         end
+
+        -- chttrans 简繁转换模块（OpenCC 后端，港繁配置见下）
+        -- 依赖的系统 libopencc 由发行版提供（Fedora: opencc 包）
+        -- chttrans（简繁转换）+ punctuation（中文标点）：
+        -- 琅琊的依赖模块，一并用户级安装（引擎 activate 拉起）
+        for _, mod in ipairs({"chttrans", "punctuation"}) do
+            local so = path.join(root, "usr", "lib64", "fcitx5",
+                                 "lib" .. mod .. ".so")
+            if os.isfile(so) then
+                os.cp(so, libdir_)
+                local conf = path.join(root, "usr", "share", "fcitx5",
+                                       "addon", mod .. ".conf")
+                if mod == "chttrans" then
+                    -- 两处适配：1) 剥离 notifications 可选依赖（桌面
+                    -- 永不加载，等待会卡死）；2) OnDemand→False 随
+                    -- fcitx5 启动加载（OnDemand 拉起在部分环境死结）
+                    local nl = string.char(10)
+                    local pat = "%[Addon/OptionalDependencies%]"
+                        .. "%s*" .. nl .. "+0=notifications[%s" .. nl .. "]*"
+                    local t = io.readfile(conf):gsub(pat, "")
+                        :gsub("OnDemand=True", "OnDemand=False")
+                    io.writefile(path.join(share, "fcitx5", "addon",
+                                           "chttrans.conf"), t)
+                else
+                    os.cp(conf, path.join(share, "fcitx5", "addon"))
+                end
+            else
+                print("提示：缺 lib" .. mod .. ".so，跳过该模块")
+            end
+        end
+        -- 用户级配置：简→繁用香港标准（s2hk），繁→简用 hk2s
+        local confdir = path.join(home, ".config", "fcitx5", "conf")
+        os.mkdir(confdir)
+        io.writefile(path.join(confdir, "chttrans.conf"),
+                     "# 简繁转换（OpenCC）：香港繁体标准\n"
+                     .. "[OpenCC]\n"
+                     .. "# 简体 -> 港繁；反向用港繁专用表\n"
+                     .. "OpenCCS2TProfile=s2hk.json\n"
+                     .. "OpenCCT2SProfile=hk2s.json\n"
+                     .. "# 切换键（fcitx5 默认）\n"
+                     .. "Hotkey=Control+Shift+F\n")
 
         -- addon 搜索路径（fcitx5 不默认搜 ~/.local/lib/fcitx5）：
         -- environment.d 对 systemd 用户会话生效（KDE Wayland 需重新登录）

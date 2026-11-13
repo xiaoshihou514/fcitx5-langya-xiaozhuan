@@ -8,7 +8,12 @@ Type=SharedLibrary
 OnDemand=True
 Configurable=True
 
-# punctuation 为可选增强（硬依赖会在其缺失时被 fcitx5 静默剔除，
-# Fedora 将其拆入 fcitx5-chinese-addons 数据包）
-[Addon/OptionalDependencies]
+# punctuation：中文标点服务（zh_CN 映射与配对/多候选状态机，
+# 与 fcitx5 拼音共用同一模块同一配置）
+[Addon/Dependencies]
 0=punctuation
+
+# chttrans：简繁转换（OpenCC 后端，港繁 profile 由用户级
+# conf/chttrans.conf 提供）。OnDemand 模块须由引擎声明依赖拉起
+[Addon/OptionalDependencies]
+0=chttrans

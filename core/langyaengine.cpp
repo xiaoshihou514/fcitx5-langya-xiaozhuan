@@ -14,6 +14,9 @@
 #include <fcitx/statusarea.h>
 #include <fcitx/userinterface.h>
 #include <fcitx/userinterfacemanager.h>
+#include <fcitx-utils/utf8.h>
+#include <fcitx-utils/cutf8.h>
+#include "punctuation_public.h"
 
 #include <libime/pinyin/pinyindictionary.h>
 #include <libime/core/userlanguagemodel.h>
@@ -121,6 +124,23 @@ private:
     std::string hanzi_;
 };
 
+/* 标点候选（多映射键的候选窗词条：选中上屏该标点并退出模式） */
+class PuncCandidateWord : public fcitx::CandidateWord {
+public:
+    PuncCandidateWord(LangyaEngine *engine, std::string text)
+        : CandidateWord(fcitx::Text(std::move(text))), engine_(engine) {}
+
+    void select(fcitx::InputContext *ic) const override {
+        ic->commitString(text().toString());
+        engine_->state(ic)->puncMode = false;
+        ic->inputPanel().reset();
+        ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+    }
+
+private:
+    LangyaEngine *engine_;
+};
+
 /* ── 状态与生命周期 ─────────────────────────────────────── */
 
 LangyaState::LangyaState(LangyaEngine *engine)
@@ -191,6 +211,10 @@ void LangyaEngine::activate(const fcitx::InputMethodEntry & /*entry*/,
                             fcitx::InputContextEvent &event) {
     auto *ic = event.inputContext();
     auto *st = state(ic);
+    // 拉起简繁转换模块（OnDemand：无显式请求不加载；此处请求
+    // 加载使 Ctrl+Shift+F 与状态区简/繁按钮对琅琊生效。模块
+    // 缺失时不影响引擎本身——conf 中保持可选依赖）
+    instance_->addonManager().addon("chttrans");
     st->context.clear();
     st->sealMode = config_.sealByDefault.value();
     ic->statusArea().addAction(fcitx::StatusGroup::InputMethod,
@@ -209,6 +233,86 @@ void LangyaEngine::reset(const fcitx::InputMethodEntry & /*entry*/,
 
 LangyaState *LangyaEngine::state(fcitx::InputContext *ic) {
     return ic->propertyFor(&factory_);
+}
+
+// 标点处理：与 PinyinEngine::handlePunc 同语义。
+// 组字时选高亮候选并吞键（标点随后续按键输出）；非组字查
+// punctuation 模块：单映射直接上屏（含配对），多映射弹候选窗。
+bool LangyaEngine::handlePunc(fcitx::KeyEvent &event) {
+    using namespace fcitx;
+    auto *ic = event.inputContext();
+    auto *st = state(ic);
+    auto &ctx = st->context;
+
+    // 标点候选模式：数字选映射，退格/其他键退出
+    if (st->puncMode) {
+        event.filterAndAccept();
+        auto candList = ic->inputPanel().candidateList();
+        if (candList && !event.key().hasModifier()) {
+            int idx = event.key().digitSelection();
+            if (idx >= 0 && idx < candList->size()) {
+                candList->candidate(idx).select(ic);
+                return true;
+            }
+        }
+        st->puncMode = false;
+        updateUI(ic);
+        return true;
+    }
+
+    if (event.key().hasModifier() || event.isVirtual()) {
+        return false;
+    }
+    auto c = Key::keySymToUnicode(event.key().sym());
+    if (!c) {
+        return false;
+    }
+
+    // 组字中：选高亮候选，吞键（拼音同款：标点本次不输出）
+    if (!ctx.userInput().empty()) {
+        if (auto candList = ic->inputPanel().candidateList();
+            candList && candList->size() > 0) {
+            int cur = candList->cursorIndex();
+            candList->candidate(cur < 0 ? 0 : cur).select(ic);
+        } else {
+            ctx.clear();
+            updateUI(ic);
+        }
+        event.filterAndAccept();
+        return true;
+    }
+
+    // 非组字：查 punctuation 模块（zh_CN 表）
+    if (!punctuation()) {
+        return false;
+    }
+    auto candidates = punctuation()->call<IPunctuation::getPunctuationCandidates>(
+        "zh_CN", c);
+    if (candidates.empty()) {
+        return false;   // 表外键（如 /）不拦，直出原字符
+    }
+    event.filterAndAccept();
+    if (candidates.size() == 1) {
+        auto [punc, puncAfter] =
+            punctuation()->call<IPunctuation::pushPunctuationV2>("zh_CN",
+                                                                 ic, c);
+        if (!punc.empty()) {
+            ic->commitString(punc + puncAfter);
+        }
+        return true;
+    }
+    // 多映射（如 [ → 【「『）：弹候选窗
+    st->puncMode = true;
+    st->puncCandidates = candidates;
+    auto candList = std::make_unique<CommonCandidateList>();
+    candList->setPageSize(static_cast<int>(candidates.size()));
+    for (auto &cand : candidates) {
+        candList->append<PuncCandidateWord>(this, cand);
+    }
+    candList->setGlobalCursorIndex(0);
+    ic->inputPanel().setCandidateList(std::move(candList));
+    ic->updateUserInterface(UserInterfaceComponent::InputPanel);
+    return true;
 }
 
 void LangyaEngine::toggleMode(fcitx::InputContext *ic) {
@@ -334,6 +438,12 @@ void LangyaEngine::keyEvent(const fcitx::InputMethodEntry & /*entry*/,
         event.filterAndAccept();
         return;
     }
+    // 中文标点（punctuation 模块，拼音同款：组字时＝选高亮候选
+    // 并吞键；非组字＝查表转换/多映射候选窗；表外键不拦直出）
+    if (handlePunc(event)) {
+        return;
+    }
+
     if (composing && noModifier(key.states())) {
         // 组字中的其余无修饰键吞掉，防泄入应用
         event.filterAndAccept();
@@ -348,6 +458,9 @@ void LangyaEngine::updateUI(fcitx::InputContext *ic) {
     auto &ctx = st->context;
     auto &panel = ic->inputPanel();
 
+    if (st->puncMode) {
+        return;   // 标点候选窗保持
+    }
     if (ctx.userInput().empty()) {
         panel.reset();
         ic->updatePreedit();
