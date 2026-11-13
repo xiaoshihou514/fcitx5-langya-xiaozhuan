@@ -1,0 +1,65 @@
+diff --git a/app/src/main/java/org/fcitx/fcitx5/android/core/data/DataManager.kt b/app/src/main/java/org/fcitx/fcitx5/android/core/data/DataManager.kt
+index f134cc76..cceb9239 100644
+--- a/app/src/main/java/org/fcitx/fcitx5/android/core/data/DataManager.kt
++++ b/app/src/main/java/org/fcitx/fcitx5/android/core/data/DataManager.kt
+@@ -90,7 +90,7 @@ object DataManager {
+ 
+         val pm = appContext.packageManager
+ 
+-        val pluginPackages = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
++        val queriedPackages = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+             pm.queryIntentActivities(
+                 Intent(PLUGIN_INTENT),
+                 PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_ALL.toLong())
+@@ -101,6 +101,16 @@ object DataManager {
+             it.activityInfo.packageName
+         }
+ 
++        // Union the intent query with previously loaded plugin packages that
++        // are still installed. On cold boot fcitx may start before user
++        // unlock, when PackageManager may not resolve plugin activities yet;
++        // the query-only result would treat installed plugins as unloaded and
++        // wipe their data, disabling plugin addons (upstream issue #410).
++        val knownPackages = loadKnownPlugins().filter { pkg ->
++            runCatching { pm.getPackageInfo(pkg, 0) }.isSuccess
++        }
++        val pluginPackages = (queriedPackages + knownPackages).distinct()
++
+         Timber.d("Detected plugin packages: ${pluginPackages.joinToString()}")
+ 
+         // Parse plugin.xml
+@@ -266,6 +276,7 @@ object DataManager {
+         destDescriptorFile.bufferedWriter().use {
+             it.write(serializeDataDescriptor(newHierarchy.downToDataDescriptor()))
+         }
++        saveKnownPlugins(loadedPlugins.map { it.packageName }.toSet())
+         callbacks.forEach { it() }
+         callbacks.clear()
+         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+@@ -297,6 +308,26 @@ object DataManager {
+         }
+     }
+ 
++    // Persistent record of loaded plugin packages, used by detectPlugins()
++    // to survive cold-boot PackageManager query misses. Lives in device
++    // protected storage alongside the rest of fcitx data.
++    private val knownPluginsFile = File(dataDir, "known-plugins.txt")
++
++    private fun loadKnownPlugins(): Set<String> =
++        knownPluginsFile.takeIf { it.exists() }
++            ?.readLines()
++            ?.filter { it.isNotBlank() }
++            ?.toSet()
++            ?: emptySet()
++
++    private fun saveKnownPlugins(packages: Set<String>) {
++        if (packages.isEmpty()) {
++            knownPluginsFile.delete()
++        } else {
++            knownPluginsFile.writeText(packages.sorted().joinToString("\n"))
++        }
++    }
++
+     fun deleteAndSync() {
+         lock.withLock {
+             dataDir.resolve(BuildConfig.DATA_DESCRIPTOR_NAME).delete()

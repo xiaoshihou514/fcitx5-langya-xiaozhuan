@@ -93,6 +93,25 @@ task("setup-android")
                          "lib/libime/src/main/cpp/libime"})
         -- 同步（与 sync-android 相同的脚本作用域逻辑）
         local core = path.join(os.projectdir(), "core")
+        -- 宿主树补丁：冷启动时 PackageManager 可能还解析不到插件活动
+        -- （fcitx 先于用户解锁启动），仅靠意图查询会把已安装插件当卸载
+        -- 处理、误清插件数据，附加组件随之被禁用（上游 issue #410）。
+        -- 补丁让插件扫描并入已装载插件的持久记录（仍在安装即保留）。
+        local patch = path.join(os.projectdir(), "android", "patches",
+                                "0001-datamanager-cold-boot-plugin-scan.patch")
+        if os.isfile(patch) then
+            local fresh = true
+            try {
+                function () os.execv("git", {"-C", host, "apply", "--check", patch}) end,
+                catch { function (errs) fresh = false end }
+            }
+            if fresh then
+                os.execv("git", {"-C", host, "apply", patch})
+                print("已套用宿主补丁：冷启动插件扫描保护")
+            else
+                print("宿主补丁已套用或不再适用，跳过")
+            end
+        end
         local dest = path.join(host, "plugin", "langya")
         os.mkdir(dest)
         os.cp(path.join(os.projectdir(), "android", "plugin", "."), dest)
