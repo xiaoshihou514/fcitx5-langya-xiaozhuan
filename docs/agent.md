@@ -53,6 +53,14 @@ xmake f -m release -y && xmake
 xmake install -o <prefix>            # 布局同 cmake --install
 ```
 
+> **已知环境坑**：工作区路径含非 ASCII 字符（如本仓库上层目录「小篆」）时，
+> `pkg-config` 输出会对路径做转义，xmake 的 `find_package` 解析后
+> 会丢失 `Fcitx5Config/Fcitx5Utils` 的包含目录，导致编译报
+> `fcitx-config/configuration.h` 找不到。此时改用上文的 CMake 路线，
+> 或将 fcitx5 开发前缀放在纯 ASCII 路径（如 `/tmp/fcitx5root`，可用
+> `tools/setup_fcitx5root.sh` 从 RPM 解包，见 tests/ 一节），或直接
+> 系统级安装 fcitx5-devel（包管理装到 /usr，路径纯 ASCII，不受影响）。
+
 集成测试可用任意构建产物（`LANGYA_SO` 覆盖被测引擎）：
 
 ```bash
@@ -103,6 +111,9 @@ langya/
 ```bash
 # 需先完成数据生成；FCITX_ROOT 为含 fcitx5 运行时与开发头文件的
 # 前缀（任务会构建、布置 langya 三件套并运行）
+# 无系统级 fcitx5-devel 时，可先 tools/setup_fcitx5root.sh
+# 从 Fedora RPM 解包出 /tmp/fcitx5root（含标点表、sc.dict 等
+# 运行数据，从 android 宿主树 assets 回退补齐）再运行
 xmake engine-test
 ```
 

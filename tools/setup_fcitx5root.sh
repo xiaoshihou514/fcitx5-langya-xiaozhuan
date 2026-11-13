@@ -8,11 +8,23 @@ ROOT=/tmp/fcitx5root
 RPM=/tmp/fcitx5rpm
 mkdir -p "$ROOT" "$RPM"
 
+# dnf 缓存/日志重定向到 $RPM：宿主 ~/.cache、~/.local/state 只读或
+# 不可写时（沙箱、受限账号）dnf download 会直接失败
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$RPM/xdgcache}"
+export XDG_STATE_HOME="${XDG_STATE_HOME:-$RPM/xdgstate}"
+dnf() { /usr/bin/dnf --setopt=logdir="$RPM/xdgstate/dnf" \
+              --setopt=cachedir="$RPM/xdgcache/dnf" "$@"; }
+
+# 本仓库根（用于从 android 宿主树回退取数据文件）
+LANGYA_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+HOST_SHARE="$LANGYA_DIR/android/build/fcitx5-android/app/src/main/assets/usr/share"
+
 need() { rpm -q --whatprovides "$1" >/dev/null 2>&1 || rpm -q "$1" >/dev/null 2>&1; }
 
 echo "── 下载 RPM（若缓存缺失）──"
 cd "$RPM"
 for spec in fcitx5-libs fcitx5-devel fcitx5 fcitx5-data fcitx5-chinese-addons \
+            fcitx5-chinese-addons-devel \
             extra-cmake-modules libime libime-devel boost-devel opencc; do
     # 仅当解包目标缺关键文件时下载
     if ! ls "$ROOT/usr/lib64/libFcitx5Core.so" >/dev/null 2>&1 \
@@ -47,7 +59,26 @@ grep -rl '"/usr/include\|"/usr/lib64' "$ROOT/usr/lib64/cmake/" 2>/dev/null | \
 mkdir -p "$ROOT/usr/share/libime"
 cp -n "$ROOT"/usr/lib64/libime/zh_CN.lm* "$ROOT/usr/share/libime/" 2>/dev/null || true
 
-echo "── sc.dict（宿主 APK 提取）──"
+echo "── 数据文件回退（宿主树 assets → 手机 APK）──"
+# engine-test 与 punctuation 模块需要的运行数据：sc.dict、标点表、
+# punctuation/chttrans 的 addon conf。优先从本仓库 android 宿主树
+# assets 取（离线可用），宿主树未就绪时再试手机。
+backfill() {  # backfill <前缀内相对路径>
+    local rel="$1"
+    local src="$HOST_SHARE/$rel"
+    local dst="$ROOT/usr/share/${rel%/*}"
+    if [ ! -s "$ROOT/usr/share/$rel" ] && [ -s "$src" ]; then
+        mkdir -p "$dst"
+        cp "$src" "$dst/"
+        echo "  已从宿主树补 $rel"
+    fi
+}
+backfill libime/sc.dict
+backfill fcitx5/punctuation/punc.mb.zh_CN
+backfill fcitx5/punctuation/punc.mb.zh_HK
+backfill fcitx5/punctuation/punc.mb.zh_TW
+backfill fcitx5/addon/punctuation.conf
+backfill fcitx5/addon/chttrans.conf
 if [ ! -s "$ROOT/usr/share/libime/sc.dict" ]; then
     APK=$(mktemp -u /tmp/host.XXXX.apk)
     p=$(adb shell pm path org.fcitx.fcitx5.android 2>/dev/null \
