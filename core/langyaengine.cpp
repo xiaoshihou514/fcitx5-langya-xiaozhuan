@@ -523,15 +523,17 @@ void LangyaEngine::updateUI(fcitx::InputContext *ic) {
     }
 
     // 预编辑（与 fcitx5 拼音同款）：
-    //   客户端预编辑（应用输入框内嵌）＝ 自动转换整句的楷化显示
-    //   ＝ 已选句 + 当前最优候选（打 nihao 输入框直接显示「你好」）；
+    //   客户端预编辑（应用输入框内嵌）＝ 按当前输出模式转换的整句
+    //   ＝ 已选句 + 当前最优候选（K5：失焦时 fcitx 会把客户端预编辑
+    //   提交给应用，因此必须与实际上屏文本同模式，否则小篆模式下
+    //   应用收到的是楷化字）；
     //   面板预编辑（候选栏上方）＝ 拼音串（libime 带音节分隔）
     std::string sentence = ctx.selectedSentence();
     if (!ctx.candidatesToCursor().empty()) {
         sentence += ctx.candidatesToCursor()[0].toString();
     }
     fcitx::Text clientPreedit(
-        charmap().convert(sentence, false).first);
+        charmap().convert(sentence, st->sealMode).first);
     clientPreedit.setCursor(clientPreedit.textLength());
     panel.setClientPreedit(clientPreedit);
     panel.setPreedit(fcitx::Text(ctx.preedit()));

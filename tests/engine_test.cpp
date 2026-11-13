@@ -349,6 +349,22 @@ int main() {
         check(!key("A"), "字母 A 放行");
         check(!key("period"), "字母后的句号放行（K1）");
 
+        // ═══ K5 回归：组字中失焦提交当前模式文本 ═══
+        newIC("t4c-失焦提交");
+        // 小篆模式：wo + 失焦 → 应提交小篆「𿕾」而非楷化预编辑
+        check(type("wo"), "wo 组字被吞");
+        ic->focusOut();
+        check(commitIs(cp(0x3F57E)),
+              "小篆模式失焦提交小篆「𿕾」（K5，非楷化预编辑）");
+        ic->focusIn();
+        // 楷化模式：wo + 失焦 → 提交「我」
+        toggleMode();
+        check(type("wo"), "楷化下 wo 组字被吞");
+        ic->focusOut();
+        check(commitIs("我"), "楷化模式失焦提交「我」");
+        ic->focusIn();
+        toggleMode();  // 切回小篆
+
         // ═══ 场景组 5：模式切换与持久化 ═══
         newIC("t5-模式切换");
         toggleMode();  // 切楷化
