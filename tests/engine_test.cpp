@@ -273,6 +273,22 @@ int main() {
         check(key("backslash"), "反斜杠被吞并转换");
         check(commitIs("、"), "非组字反斜杠 → 「、」（顿号）");
 
+        // K1 回归：字母/数字后的「.」「,」为半角规则，直出给应用
+        auto n1 = g_commits.size();
+        check(!key("3"), "数字 3 放行");
+        check(!key("period"), "数字后的句号放行（K1）");
+        check(!key("1"), "数字 1 放行");
+        check(!key("4"), "数字 4 放行");
+        check(g_commits.size() == n1, "3.14 过程无上屏（半角直出）");
+        check(!key("1"), "数字 1 放行");
+        check(!key("comma"), "数字后的逗号放行（K1）");
+        check(!key("0"), "数字 0 放行");
+        check(!key("0"), "数字 0 放行");
+        check(!key("0"), "数字 0 放行");
+        check(g_commits.size() == n1, "1,000 过程无上屏（半角直出）");
+        check(!key("A"), "字母 A 放行");
+        check(!key("period"), "字母后的句号放行（K1）");
+
         // ═══ 场景组 5：模式切换与持久化 ═══
         newIC("t5-模式切换");
         toggleMode();  // 切楷化

@@ -300,16 +300,20 @@ bool LangyaEngine::handlePunc(fcitx::KeyEvent &event) {
     if (candidates.empty()) {
         return false;   // 表外键（如 /）不拦，直出原字符
     }
-    event.filterAndAccept();
     if (candidates.size() == 1) {
         auto [punc, puncAfter] =
             punctuation()->call<IPunctuation::pushPunctuationV2>("zh_CN",
                                                                  ic, c);
-        if (!punc.empty()) {
-            ic->commitString(punc + puncAfter);
+        // 半角规则（字母/数字后的「.」「,」）会返回空串＝不转换、
+        // 交给应用直出（K1）：此时不得吞键
+        if (punc.empty()) {
+            return false;
         }
+        event.filterAndAccept();
+        ic->commitString(punc + puncAfter);
         return true;
     }
+    event.filterAndAccept();
     // 多映射（如 [ → 【「『）：弹候选窗
     st->puncMode = true;
     st->puncCandidates = candidates;
