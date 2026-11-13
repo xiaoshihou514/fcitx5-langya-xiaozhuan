@@ -512,7 +512,7 @@ void LangyaEngine::updateUI(fcitx::InputContext *ic) {
 
     ic->updatePreedit();
     ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
-    FCITX_INFO() << "琅琊查表 " << ctx.userInput()
+    FCITX_DEBUG() << "琅琊查表 " << ctx.userInput()
                  << " 命中 " << ctx.candidatesToCursor().size();
 }
 
@@ -527,7 +527,7 @@ void LangyaEngine::commitEntry(fcitx::InputContext *ic,
     ic->inputPanel().reset();
     ic->updatePreedit();
     ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
-    FCITX_INFO() << "琅琊上屏 " << hanzi << " → " << out
+    FCITX_DEBUG() << "琅琊上屏 " << hanzi << " → " << out
                  << (m || miss ? "（含未收字）" : "");
 }
 
