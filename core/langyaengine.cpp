@@ -277,18 +277,25 @@ bool LangyaEngine::handlePunc(fcitx::KeyEvent &event) {
         return false;
     }
 
-    // 组字中：选高亮候选，吞键（拼音同款：标点本次不输出）
+    // 组字中：选高亮候选；若整句随之完成上屏，继续输出标点
+    // （K2，与上游 PinyinEngine::handlePunc 同语义：nihao, → 你好，）；
+    // 部分选择或无候选可续时才吞键
     if (!ctx.userInput().empty()) {
         if (auto candList = ic->inputPanel().candidateList();
             candList && candList->size() > 0) {
             int cur = candList->cursorIndex();
             candList->candidate(cur < 0 ? 0 : cur).select(ic);
-        } else {
-            ctx.clear();
-            updateUI(ic);
         }
-        event.filterAndAccept();
-        return true;
+        if (!ctx.userInput().empty()) {
+            // 部分选择：剩余拼音继续组字，本次标点吞掉
+            if (!ic->inputPanel().candidateList()) {
+                ctx.clear();
+                updateUI(ic);
+            }
+            event.filterAndAccept();
+            return true;
+        }
+        // 整句已上屏：落到下方非组字标点流程，标点不丢
     }
 
     // 非组字：查 punctuation 模块（zh_CN 表）

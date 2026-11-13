@@ -266,6 +266,12 @@ int main() {
 
         // ═══ 场景组 4：非组字标点（punctuation 模块 zh_CN 表）═══
         newIC("t4-标点");
+        // K2 回归：组字中按逗号＝选候选并继续输出标点（wo, → 𿕾，）
+        check(type("wo"), "wo 组字被吞");
+        check(key("comma"), "组字中逗号被吞");
+        check(g_commits.size() >= 2 && g_commits[g_commits.size() - 2] ==
+                  cp(0x3F57E) && commitIs("，"),
+              "wo+逗号 → 「𿕾，」（候选＋标点，K2）");
         check(key("comma"), "逗号被吞并转换");
         check(commitIs("，"), "非组字逗号 → 「，」");
         check(key("period"), "句号被吞并转换");
