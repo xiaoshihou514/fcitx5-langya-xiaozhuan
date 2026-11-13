@@ -221,9 +221,10 @@ void LangyaEngine::activate(const fcitx::InputMethodEntry & /*entry*/,
                             fcitx::InputContextEvent &event) {
     auto *ic = event.inputContext();
     auto *st = state(ic);
-    // 拉起简繁转换模块（OnDemand：无显式请求不加载；此处请求
-    // 加载使 Ctrl+Shift+F 与状态区简/繁按钮对琅琊生效。模块
-    // 缺失时不影响引擎本身——conf 中保持可选依赖）
+    // 拉起简繁转换模块（可选依赖；使 Ctrl+Shift+F 与状态区简/繁
+    // 按钮对琅琊生效。模块缺失时不影响引擎本身。档位配置来源：
+    // 桌面系统级/用户级 conf 提供 s2hk 港繁；Android 宿主为
+    // OpenCC 默认档）
     instance_->addonManager().addon("chttrans");
     st->context.clear();
     st->sealMode = config_.sealByDefault.value();

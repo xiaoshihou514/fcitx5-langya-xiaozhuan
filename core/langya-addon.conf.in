@@ -19,7 +19,10 @@ Configurable=True
 [Addon/Dependencies]
 0=punctuation
 
-# chttrans：简繁转换（OpenCC 后端，港繁 profile 由用户级
-# conf/chttrans.conf 提供）。引擎已声明依赖，由 fcitx5 按依赖序拉起
+# chttrans：简繁转换（OpenCC 后端）。引擎已声明依赖，由 fcitx5
+# 按依赖序拉起。档位配置来源随平台：桌面系统级安装提供
+# /etc/xdg/fcitx5/conf/chttrans.conf（港繁 s2hk）；用户级 xmake
+# 安装提供 ~/.config/fcitx5/conf/chttrans.conf；Android 宿主无法
+# 下发 PkgConfig 文件，走 OpenCC 默认档（标准繁体）
 [Addon/OptionalDependencies]
 0=chttrans

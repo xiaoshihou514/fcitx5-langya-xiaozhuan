@@ -18,7 +18,8 @@
            │    說文未收字回退原字，候选窗口提示「說文未收」
            │
            └─ 模块依赖：punctuation（中文标点，zh_CN 表，与拼音共用）、
-                chttrans（简繁转换，简→港繁 s2hk / 港繁→简 hk2s）
+                chttrans（简繁转换；桌面档位 s2hk 港繁经配置文件提供，
+                Android 宿主为 OpenCC 默认档）
 ```
 
 - 行为与 fcitx5 拼音一致：空格/数字上屏、翻页（PageUp/Down、-/=/+）、
@@ -108,7 +109,7 @@ langya/
 ├── core/                    # 引擎核心（与 Android 版共享，勿放平台代码）
 │   ├── langyaengine.*       # 输入法引擎（键处理/候选/模式切换/CharMap）
 │   ├── addonfactory.cpp     # addon 工厂
-│   ├── chttrans.conf        # 简繁转换配置（OpenCC 港繁档位）
+│   ├── chttrans.conf        # 简繁转换配置（桌面安装到系统/用户配置目录；Android 端不适用）
 │   ├── langya-addon.conf.in # addon 注册模板
 │   └── langya.conf.in       # 输入法条目模板
 ├── xmake.lua                # xmake 构建（与 CMake 同步，Linux 侧）
