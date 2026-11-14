@@ -83,14 +83,18 @@ task("setup-android")
                              "origin", ref})
             os.execv("git", {"-C", host, "checkout", "FETCH_HEAD"})
         end
-        -- 构建插件所需子模块（fcitx5 本体 / prebuilt / libime）
-        print("初始化子模块（fcitx5 / prebuilt / libime）…")
+        -- 构建插件所需子模块：fcitx5 本体 / prebuilt / libime，以及
+        -- gradle 一并配置的 lib 模块 fcitx5-lua、fcitx5-chinese-addons
+        --（后者提供插件依赖的 punctuation）。全新克隆缺这两个会配置失败
+        print("初始化子模块（fcitx5 / prebuilt / libime / lua / chinese-addons）…")
         -- --recursive：libime 内嵌 kenlm 等二级子模块一并锁定
         os.execv("git", {"-C", host, "submodule", "update", "--init",
                          "--recursive", "--depth", "1",
                          "lib/fcitx5/src/main/cpp/fcitx5",
                          "lib/fcitx5/src/main/cpp/prebuilt",
-                         "lib/libime/src/main/cpp/libime"})
+                         "lib/libime/src/main/cpp/libime",
+                         "lib/fcitx5-lua/src/main/cpp/fcitx5-lua",
+                         "lib/fcitx5-chinese-addons/src/main/cpp/fcitx5-chinese-addons"})
         -- 同步（与 sync-android 相同的脚本作用域逻辑）
         local core = path.join(os.projectdir(), "core")
         -- 宿主树补丁：冷启动时 PackageManager 可能还解析不到插件活动
