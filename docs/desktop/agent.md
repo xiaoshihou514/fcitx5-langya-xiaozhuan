@@ -80,6 +80,28 @@ xmake install -o <prefix>            # 布局同 cmake --install
 > `tools/setup_fcitx5root.sh` 从 RPM 解包，见下文测试一节），或直接
 > 系统级安装 fcitx5-devel（包管理装到 /usr，路径纯 ASCII，不受影响）。
 
+## 分发（nightly 便携包）
+
+`.github/workflows/nightly.yml` 每天 UTC 18:00（有新提交时）构建并发布到
+`nightly` 预发布：Android 插件 APK（arm64-v8a）＋ Linux 便携包。
+
+桌面不走 rpm/deb：`packaging/linux/build-tarball.sh` 在 Ubuntu 24.04
+（fcitx5 5.1.7，老头文件编译、向后兼容新版 5.1.x）构建
+`langya-<ver>-linux-x86_64.tar.gz`，解压后 `./install.sh` 装到 `~/.local`：
+
+- 本体：langya.so（RUNPATH=$ORIGIN）、addon/inputmethod 注册、映射表、图标；
+- `bundle/`：libime 库、sc.dict、zh_CN.lm、punctuation/chttrans 模块
+ （附 boost_iostreams 与 Debian soname 的 libbz2）——只在系统缺失时取用，
+  系统已有（装了 fcitx5-chinese-addons）一律复用、不遮蔽；
+- environment.d 写 FCITX_ADDON_DIRS（必要时 LIBIME_MODEL_DIRS），重新登录生效；
+- 安装清单 `~/.local/share/fcitx5/langya/installed-files.list`，`--uninstall` 按清单删除。
+
+兼容：引擎经 `__has_include(<fcitx-utils/standardpaths.h>)` 在新旧
+StandardPath(s) 接口间切换，5.1.7 起均可编译。
+
+Android 签名：与 jiyi 一致，用 CI 现场生成的调试密钥（每次不同，升级需先卸载旧插件）；
+配置 secrets `ANDROID_KEYSTORE_BASE64`／`ANDROID_KEYSTORE_PASSWORD`／`ANDROID_KEY_ALIAS` 后自动改用固定密钥。
+
 ## 数据管线
 
 ```

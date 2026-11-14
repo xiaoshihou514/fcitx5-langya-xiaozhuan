@@ -4,3 +4,5 @@ __pycache__/
 .xmake/
 # 现场抓取的原始日志（调研数据产物，量大不入库；调研结论见 docs/）
 forensics/
+build-pkg/
+dist/
