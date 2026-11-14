@@ -3,10 +3,13 @@
 
 从源 SVG 抠 path_seal_zhuan 及其原始 transform 链（不烘焙坐标——
 该路径含 V/H 命令且链上带负 scale，烘焙会上下颠倒），viewBox 由
-512px 渲染的 alpha 像素 bbox 反推。产出两份：
-  icons/scalable/apps/langya.svg          黑字（hicolor，浅色主题）
-  icons/breeze-dark/scalable/apps/...     白字（breeze-dark，暗色主题）
-KDE 暗色模式的图标主题即 breeze-dark，QIcon 自动取白色版，无需检测。
+512px 渲染的 alpha 像素 bbox 反推。产出一份：
+  icons/scalable/apps/langya.svg（hicolor）
+暗色自适应用 Breeze 同款「current-color-scheme」样式表：path 填
+currentColor、class=ColorScheme-Text，KDE 按当前配色把文字色注入，
+亮/暗主题一份通吃；非 KDE 渲染器取默认深灰 #232629。
+（旧方案另装 breeze-dark/scalable/apps 白字版，但 breeze-dark 的
+index.theme 未登记 scalable/apps 目录，永远查不到，暗色下仍取黑字。）
 
 用法：uv run --project ../zhuan python tools/make_desktop_icon.py
 """
@@ -73,33 +76,30 @@ def main() -> int:
     by0, by1 = ys.min() / 512 * 50.8, ys.max() / 512 * 50.8
     print(f"像素 bbox x[{bx0:.2f},{bx1:.2f}] y[{by0:.2f},{by1:.2f}]")
 
-    def make_svg(fill: str) -> str:
+    def make_svg() -> str:
         return (f'<svg xmlns="http://www.w3.org/2000/svg" '
                 f'viewBox="{bx0:.2f} {by0:.2f} {bx1-bx0:.2f} {by1-by0:.2f}">'
+                f'<style type="text/css" id="current-color-scheme">'
+                f'.ColorScheme-Text {{ color: #232629; }}</style>'
                 f'<g transform="{chain}">'
-                f'<path fill="{fill}" d="{d_clean}"/></g></svg>')
+                f'<path class="ColorScheme-Text" fill="currentColor" '
+                f'd="{d_clean}"/></g></svg>')
 
     icons = HERE.parent / "icons"
-    black = icons / "scalable" / "apps" / "langya.svg"
-    black.parent.mkdir(parents=True, exist_ok=True)
-    black.write_text(make_svg("#000"), encoding="utf-8")
-    print(f"✓ {black}（黑，{black.stat().st_size} 字节）")
-    white = icons / "breeze-dark" / "scalable" / "apps" / "langya.svg"
-    white.parent.mkdir(parents=True, exist_ok=True)
-    white.write_text(make_svg("#fff"), encoding="utf-8")
-    print(f"✓ {white}（白，{white.stat().st_size} 字节）")
+    out = icons / "scalable" / "apps" / "langya.svg"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(make_svg(), encoding="utf-8")
+    print(f"✓ {out}（{out.stat().st_size} 字节）")
 
-    # 安装：hicolor=黑，breeze-dark=白；清理旧 PNG
+    # 安装到用户 hicolor；清理旧 PNG 与旧 breeze-dark 白字版
     home_icons = Path.home() / ".local/share/icons"
-    for sub, src in (("hicolor", black), ("breeze-dark", white)):
-        dst = home_icons / sub / "scalable" / "apps" / "langya.svg"
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["cp", str(src), str(dst)], check=True)
-    for old in home_icons.glob("*x*/apps/langya.png"):
+    dst = home_icons / "hicolor" / "scalable" / "apps" / "langya.svg"
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["cp", str(out), str(dst)], check=True)
+    for old in [*home_icons.glob("*x*/apps/langya.png"),
+                *home_icons.glob("**/breeze-dark/scalable/apps/langya.svg")]:
         old.unlink()
-    subprocess.run(["fc-cache", "-f"], capture_output=True)
-    print("✓ 已安装黑(hicolor)+白(breeze-dark)并刷新缓存")
-    print("  暗色模式由 breeze-dark 主题自动取白版，无需运行时检测")
+    print("✓ 已安装到 hicolor（亮/暗配色由 KDE 自动着色）")
     return 0
 
 

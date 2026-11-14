@@ -4,6 +4,9 @@
 #include <fcitx-utils/cutf8.h>
 #include <fcitx-utils/utf8.h>
 #include <fcitx-utils/standardpath.h>
+#if __has_include(<fcitx-utils/standardpaths.h>)
+#include <fcitx-utils/standardpaths.h>
+#endif
 #include <fcitx-utils/stringutils.h>
 #include <fcitx/addonmanager.h>
 #include <fcitx/candidatelist.h>
@@ -27,11 +30,32 @@
 
 namespace langya {
 
+/* ── 路径查找兼容层 ─────────────────────────────────────────
+ * fcitx5 5.1.13 起新增 StandardPaths（旧 StandardPath 已弃用）；
+ * 桌面便携包在 Ubuntu 24.04（fcitx5 5.1.7）上编译以覆盖老发行版，
+ * Android 宿主为新版，两端各取可用接口。 */
+namespace {
+enum class PathKind { PkgData, Data };
+std::string locateFile(PathKind kind, const char *rel) {
+#if __has_include(<fcitx-utils/standardpaths.h>)
+    return fcitx::StandardPaths::global()
+        .locate(kind == PathKind::PkgData ? fcitx::StandardPathsType::PkgData
+                                          : fcitx::StandardPathsType::Data,
+                rel)
+        .string();
+#else
+    return fcitx::StandardPath::global().locate(
+        kind == PathKind::PkgData ? fcitx::StandardPath::Type::PkgData
+                                  : fcitx::StandardPath::Type::Data,
+        rel);
+#endif
+}
+} // namespace
+
 /* ── 汉字映射 ───────────────────────────────────────────── */
 
 bool CharMap::load() {
-    const auto path = fcitx::StandardPaths::global().locate(
-        fcitx::StandardPathsType::PkgData, "langya/langya.map");
+    const auto path = locateFile(PathKind::PkgData, "langya/langya.map");
     if (path.empty()) {
         return false;
     }
@@ -186,9 +210,7 @@ LangyaEngine::LangyaEngine(fcitx::Instance *instance)
     const std::string dictPath =
         (dictEnv && *dictEnv)
         ? std::string(dictEnv)
-        : fcitx::StandardPaths::global()
-              .locate(fcitx::StandardPathsType::Data, "libime/sc.dict")
-              .string();
+        : locateFile(PathKind::Data, "libime/sc.dict");
     if (!dictPath.empty()) {
         ime_.dict()->load(libime::PinyinDictionary::SystemDict, dictPath.c_str(),
                           libime::PinyinDictFormat::Binary);
@@ -198,9 +220,7 @@ LangyaEngine::LangyaEngine(fcitx::Instance *instance)
     }
     // 语言模型缺失时 libime 静默降级为无频率排序：单字候选全是生僻字
     // （如 yi→荑嗌㡫，task-16 缺陷）。在此显式检测并给出可行动的报错。
-    if (fcitx::StandardPaths::global()
-            .locate(fcitx::StandardPathsType::Data, "libime/zh_CN.lm")
-            .empty()) {
+    if (locateFile(PathKind::Data, "libime/zh_CN.lm").empty()) {
         FCITX_ERROR() << "琅琊：未找到 libime/zh_CN.lm 语言模型，"
                          "单字候选将失去词频排序（表现为生僻字居前）。"
                          "请重装或运行 xmake install 补齐 libime 数据";
